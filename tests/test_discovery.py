@@ -156,3 +156,21 @@ def test_engine_discovers_and_starts_polling_new_sport(tmp_path):
     assert json.loads((tmp_path / "d.json").read_text())["synot"]["found"] == {"hockey": 29}
     # nothing left to look up next time
     assert eng.start_discovery(cache) is None
+
+
+def test_doxxbet_sport_found_from_betradar_sport_id_without_any_reference():
+    def answer(body):
+        br = {54: 1, 63: 2, 67: 4, 70: 5}.get(body["sport"])
+        if br is None:
+            return {"EventChanceTypes": [], "Odds": {}}
+        return {"EventChanceTypes": [{"SportID": body["sport"], "BetradarSportID": br,
+                                      "BetradarStatisticsUrn": "sr:match:1"}], "Odds": {}}
+
+    p = DoxxbetProvider(client=client(Site(answer)))
+    found = discover(p, probe_doxxbet, ["hockey", "basketball", "tennis"], {}, skip=[54], max_candidate=100)
+    assert found == {"basketball": 63, "hockey": 67, "tennis": 70}
+
+
+def test_lookups_from_older_versions_are_retried(tmp_path):
+    (tmp_path / "d.json").write_text(json.dumps({"doxxbet": {"found": {}, "tried_v2": {"hockey": NOW.isoformat()}}}))
+    assert DiscoveryCache(tmp_path / "d.json").due("doxxbet", "hockey", NOW)

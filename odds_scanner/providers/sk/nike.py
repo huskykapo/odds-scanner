@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
-from odds_scanner.markets import DC_CODES, usable_price
+from odds_scanner.markets import DC_CODES, TWO_WAY_SPORTS, usable_price
 from odds_scanner.models import Event
 from odds_scanner.providers.parsing import parse_datetime
 from odds_scanner.providers.sk.common import SlovakProvider, make_event
@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 URL = "https://www.nike.sk/api-gw/nikeone/v1/boxes/search/portal"
 QUERY = "betNumbers&date&live=false&menu={menu}&minutes&order&prematch=true&results=false"
 MATCH_HEADER = "zápas"
+WINNER_HEADER = "víťaz zápasu"  # tennis: two-way match winner
 
 
 def _selections(row: Any) -> list[dict]:
@@ -73,7 +74,10 @@ class NikeProvider(SlovakProvider):
         sport_events = {str(e.get("sportEventId")): e for e in payload.get("sportEvents") or [] if isinstance(e, dict)}
         events = []
         for bet in payload.get("bets") or []:
-            if str(bet.get("header", "")).strip().lower() != MATCH_HEADER:
+            header = str(bet.get("header", "")).strip().lower()
+            # "Víťaz zápasu" only for no-draw sports: in basketball it would be the overtime-inclusive
+            # winner, which must never be mixed with the regulation-time "Zápas" 1X2.
+            if header != MATCH_HEADER and not (header == WINNER_HEADER and sport in TWO_WAY_SPORTS):
                 continue
             if bet.get("game", "Prematch") != "Prematch" or bet.get("bettingState", "RUNNING") != "RUNNING":
                 continue

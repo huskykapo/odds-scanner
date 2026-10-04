@@ -5,6 +5,7 @@ known for football. This module tries candidate numbers one by one (through the 
 polite client: at most one request per second per site) and recognises the sport:
 
 * Tipos / Synot replies contain the category name ("Hokej", "Basketbal", "Tenis");
+* DOXXbet sends Betradar's sport number with every match ("BetradarSportID": 1 = football);
 * otherwise the Betradar match ids in the reply are compared with matches whose sport is already
   known (e.g. MONACObet's hockey list) - the sport with the clear majority wins.
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -48,9 +50,15 @@ SPORT_NAMES = {
 }
 
 
+# Betradar's own sport numbers, sent by DOXXbet with every match ("BetradarSportID").
+BETRADAR_SPORTS = {"1": "football", "2": "basketball", "4": "hockey", "5": "tennis"}
+
+
 def sport_from_name(name: str | None) -> str | None:
     if not name:
         return None
+    if name in BETRADAR_SPORTS.values():
+        return name
     return SPORT_NAMES.get(" ".join(strip_accents(name).lower().split()))
 
 
@@ -76,17 +84,23 @@ def probe_doxxbet(provider: DoxxbetProvider, candidate: int) -> tuple[str | None
     ects = payload.get("EventChanceTypes") or [] if isinstance(payload, dict) else []
     name = None
     ids = set()
+    br_sports: Counter[str] = Counter()
     for ect in ects:
         if not isinstance(ect, dict):
             continue
         if ect.get("SportID") not in (None, candidate, str(candidate)):
             continue  # the site ignored our sport filter
+        sport = BETRADAR_SPORTS.get(str(ect.get("BetradarSportID")))
+        if sport:
+            br_sports[sport] += 1
         for key, value in ect.items():
             if name is None and isinstance(value, str) and "sport" in key.lower() and "name" in key.lower():
                 name = value
         br = betradar_digits(ect.get("BetradarStatisticsUrn"))
         if br:
             ids.add(br)
+    if br_sports:  # every DOXXbet match says which Betradar sport it is: the surest answer
+        return br_sports.most_common(1)[0][0], ids
     return name, ids
 
 
@@ -166,7 +180,7 @@ def discover(
 
 # ------------------------------------------------------------------ cache
 class DiscoveryCache:
-    """``{"doxxbet": {"found": {"hockey": 67}, "tried_v2": {"tennis": "<iso time>"}}}`` on disk."""
+    """``{"doxxbet": {"found": {"hockey": 67}, "tried_v3": {"tennis": "<iso time>"}}}`` on disk."""
 
     def __init__(self, path: Path | str = CACHE_PATH) -> None:
         self.path = Path(path)
@@ -182,8 +196,8 @@ class DiscoveryCache:
         return dict((self.data.get(provider) or {}).get("found") or {})
 
     def due(self, provider: str, sport: str, now: datetime) -> bool:
-        # "tried_v2": lookups made before DOXXbet asked for all matches (top=-1) are retried.
-        tried = ((self.data.get(provider) or {}).get("tried_v2") or {}).get(sport)
+        # "tried_v3": lookups made before DOXXbet's BetradarSportID was used are retried.
+        tried = ((self.data.get(provider) or {}).get("tried_v3") or {}).get(sport)
         try:
             return tried is None or now - datetime.fromisoformat(tried) > RETRY_AFTER
         except (TypeError, ValueError):
@@ -195,7 +209,7 @@ class DiscoveryCache:
             entry = self.data.setdefault(provider, {})
             entry.setdefault("found", {}).update(found or {})
             for sport in tried:
-                entry.setdefault("tried_v2", {})[sport] = now.isoformat()
+                entry.setdefault("tried_v3", {})[sport] = now.isoformat()
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
