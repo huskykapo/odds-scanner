@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arb Scanner</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #66707a; --line: #e2e5e9;
+    --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #0b63ce; --new: #fff6d6; --newline: #e3b341;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #171b21; --fg: #e6e9ed; --muted: #8c96a1; --line: #2a3038;
+            --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #4c9aff; --new: #2b2410; --newline: #9e7a1c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 16px; margin: 0; flex: 1 1 auto; }
+  label { color: var(--muted); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+  input, select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  input[type=number] { width: 100px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; }
+  .status { color: var(--muted); font-size: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .card.new { background: var(--new); border-color: var(--newline); }
+  .card.dead { opacity: .55; }
+  .head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; align-items: baseline; }
+  .profit { font-size: 20px; font-weight: 700; color: var(--ok); }
+  .profit.small { color: var(--warn); }
+  .ev { font-weight: 600; font-size: 15px; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+  .b-new { background: var(--newline); color: #000; }
+  .b-verify { background: var(--bad); color: #fff; }
+  .b-push { background: var(--warn); color: #000; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .stake { font-weight: 700; }
+  button { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 3px 8px; }
+  button.copied { border-color: var(--ok); color: var(--ok); }
+  a { color: var(--accent); text-decoration: none; }
+  .age-old { color: var(--bad); }
+  .totals { margin-top: 6px; font-size: 13px; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .st-ok { color: var(--ok); font-weight: 600; } .st-error { color: var(--warn); font-weight: 600; }
+  .st-blocked, .st-stopped { color: var(--bad); font-weight: 600; } .st-starting { color: var(--muted); }
+  details summary { cursor: pointer; font-weight: 600; margin: 16px 0 6px; }
+  .disclaimer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+  @media (max-width: 640px) {
+    .hide-sm { display: none; }
+    th, td { padding: 6px 3px; }
+    .profit { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Arb Scanner</h1>
+    <label>Bankroll <input id="bankroll" type="number" min="1" step="1" inputmode="decimal"> <span id="cur"></span></label>
+    <label>Sport <select id="sport"><option value="">all</option></select></label>
+    <span class="status" id="status">connecting…</span>
+  </div>
+</header>
+<main>
+  <div id="arbs"></div>
+
+  <details open>
+    <summary>Providers</summary>
+    <div class="card"><table id="providers"><thead><tr><th>Bookmaker</th><th>Status</th><th class="num">Events</th><th>Last update</th><th class="hide-sm">Note</th></tr></thead><tbody></tbody></table></div>
+  </details>
+  <details>
+    <summary>Matching quality</summary>
+    <div class="card" id="matching"></div>
+  </details>
+  <p class="disclaimer">Odds move fast and bookmakers limit accounts that bet arbs. Always check every price on the bookmaker's
+    site before placing anything. This tool only shows opportunities; it never places bets.</p>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let state = null, fetchedAt = 0, timer = null;
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v; else if (k.startsWith("on")) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  return el;
+}
+const safeUrl = (u) => (typeof u === "string" && /^https?:\/\//i.test(u)) ? u : null;
+const money = (v) => (Math.round(v * 100) / 100).toFixed(2);
+const stakeText = (v) => Number.isInteger(v) ? String(v) : v.toFixed(2);
+function roundTo(v, step) { return Number((Math.round(v / step + 1e-9) * step).toFixed(2)); }
+function ceilTo(v, step) { return Number((Math.ceil(v / step - 1e-9) * step).toFixed(2)); }
+
+// Same rule as the Python calculator: ideal split, round to each bookmaker's step, respect its
+// minimum stake, then recompute payouts and the guaranteed profit from the rounded stakes.
+function plan(legs, bankroll) {
+  const inv = legs.reduce((s, l) => s + 1 / l.effective_odds, 0);
+  const stakes = legs.map((l) => {
+    let st = roundTo(bankroll * (1 / l.effective_odds) / inv, l.step);
+    if (l.min_stake > 0) st = Math.max(st, ceilTo(l.min_stake, l.step));
+    return st;
+  });
+  const total = Number(stakes.reduce((a, b) => a + b, 0).toFixed(2));
+  const payouts = stakes.map((s, i) => s * legs[i].effective_odds);
+  const profit = Math.min(...payouts) - total;
+  return { stakes, payouts, total, profit, pct: total > 0 ? profit / total * 100 : 0 };
+}
+
+function ago(iso) {
+  if (!iso) return null;
+  const serverNow = Date.parse(state.now) + (Date.now() - fetchedAt);
+  return Math.max(0, Math.round((serverNow - Date.parse(iso)) / 1000));
+}
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function copy(text, btn) {
+  let ok = false;
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); ok = true; } } catch (e) {}
+  if (!ok) {  // phones over plain http (not a secure context): fall back to a hidden textarea
+    const ta = h("textarea", { style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta);
+    ta.select(); try { ok = document.execCommand("copy"); } catch (e) {} ta.remove();
+  }
+  btn.textContent = ok ? "copied" : text; btn.classList.add("copied");
+  setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("copied"); }, 1500);
+}
+
+function render() {
+  if (!state) return;
+  const bankroll = parseFloat($("bankroll").value) || state.bankroll;
+  const sport = $("sport").value;
+  $("cur").textContent = state.currency;
+
+  const sports = [...new Set(state.arbs.map((a) => a.sport).concat(state.sports || []))].sort();
+  const sel = $("sport");
+  const have = [...sel.options].map((o) => o.value);
+  for (const s of sports) if (!have.includes(s)) sel.append(h("option", { value: s }, s));
+
+  const highlight = state.highlight_seconds ?? 120;
+  const rows = state.arbs.filter((a) => !sport || a.sport === sport).map((a) => ({ a, p: plan(a.legs, bankroll) }));
+  rows.sort((x, y) => y.p.pct - x.p.pct);
+  const newest = rows.reduce((best, r) => (!best || Date.parse(r.a.first_seen) > Date.parse(best.a.first_seen)) ? r : best, null);
+
+  const box = $("arbs"); box.replaceChildren();
+  if (!rows.length) box.append(h("div", { class: "card empty" }, state.last_analysis ? "No arbitrage opportunities right now." : "Waiting for the first odds…"));
+  for (const { a, p } of rows) {
+    const age = ago(a.first_seen);
+    const isNew = age !== null && age <= highlight;
+    const dead = p.profit <= 0;
+    const legs = a.legs.map((l, i) => {
+      const oddsAge = ago(l.updated);
+      const link = safeUrl(l.url);
+      const site = link || safeUrl(l.homepage);
+      const odds = l.effective_odds !== l.odds ? `${l.odds.toFixed(2)} (${l.effective_odds.toFixed(3)} net)` : l.odds.toFixed(2);
+      const btn = h("button", { type: "button", title: "copy stake" }, "copy");
+      btn.addEventListener("click", () => copy(stakeText(p.stakes[i]), btn));
+      return h("tr", {},
+        h("td", {}, site ? h("a", { href: site, target: "_blank", rel: "noopener noreferrer", title: link ? "open the match" : "open the site" }, l.bookmaker + (link ? " ↗" : "")) : l.bookmaker,
+          l.event_name && l.event_name !== a.event ? h("div", { class: "meta hide-sm" }, l.event_name) : null),
+        h("td", {}, l.outcome_label),
+        h("td", { class: "num" }, odds),
+        h("td", { class: "num stake" }, stakeText(p.stakes[i])),
+        h("td", {}, btn),
+        h("td", { class: "num hide-sm" }, money(p.payouts[i])),
+        h("td", { class: "num " + (oddsAge > 120 ? "age-old" : "") }, oddsAge === null ? "?" : oddsAge + "s"));
+    });
+    box.append(h("div", { class: "card" + (isNew ? " new" : "") + (dead ? " dead" : "") },
+      h("div", { class: "head" },
+        h("div", {},
+          h("div", { class: "ev" }, a.event,
+            r_is(newest, a) && isNew ? h("span", { class: "badge b-new" }, "NEWEST") : (isNew ? h("span", { class: "badge b-new" }, "NEW") : null),
+            a.verify ? h("span", { class: "badge b-verify", title: "Unusually high profit: probably a pricing error or stale odds" }, "VERIFY MANUALLY") : null,
+            a.push_possible ? h("span", { class: "badge b-push", title: "Whole-number line: a push refunds bets" }, "push risk") : null),
+          h("div", { class: "meta" }, `${a.sport} · ${fmtTime(a.start)} · ${a.market_label}`)),
+        h("div", { class: "profit" + (p.pct < 1 ? " small" : "") }, dead ? "rounding kills it" : p.pct.toFixed(2) + " %")),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Bookmaker"), h("th", {}, "Bet"), h("th", { class: "num" }, "Odds"),
+          h("th", { class: "num" }, "Stake"), h("th", {}, ""), h("th", { class: "num hide-sm" }, "Payout"), h("th", { class: "num" }, "Age"))),
+        h("tbody", {}, legs)),
+      h("div", { class: "totals" }, `Total stake ${money(p.total)} ${state.currency} · guaranteed profit `,
+        h("b", {}, `${money(p.profit)} ${state.currency}`), age !== null ? h("span", { class: "meta" }, ` · seen ${age}s ago`) : null)));
+  }
+
+  const tbody = $("providers").tBodies[0]; tbody.replaceChildren();
+  for (const pr of state.providers) {
+    const upd = ago(pr.last_update);
+    tbody.append(h("tr", {},
+      h("td", {}, safeUrl(pr.homepage) ? h("a", { href: pr.homepage, target: "_blank", rel: "noopener noreferrer" }, pr.title) : pr.title),
+      h("td", { class: "st-" + pr.status }, pr.status),
+      h("td", { class: "num" }, pr.events),
+      h("td", {}, upd === null ? "–" : upd + "s ago"),
+      h("td", { class: "meta hide-sm" }, pr.message || "")));
+  }
+
+  const m = state.matching;
+  const per = Object.entries(m.per_bookmaker || {}).map(([k, v]) => h("div", {}, `${k}: ${v.matched}/${v.events} matched`));
+  $("matching").replaceChildren(h("div", { class: "grid" },
+    h("div", {}, h("div", {}, h("b", {}, m.multi_bookmaker_events), " matches quoted by ≥ 2 bookmakers"),
+      h("div", {}, `${m.events_in} events in → ${m.merged_events} distinct matches`),
+      h("div", {}, `joined by Betradar id: ${m.by_betradar}, by name + time: ${m.by_name}`),
+      h("div", {}, `unmatched: ${m.unmatched}, rejected (home/away swapped): ${m.rejected_swapped}`)),
+    h("div", {}, per)));
+}
+function r_is(row, a) { return row && row.a === a; }
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    state = await r.json(); fetchedAt = Date.now();
+    if (!$("bankroll").value) $("bankroll").value = store.get("bankroll") || state.bankroll;
+    $("status").textContent = `${state.arbs.length} arb(s) · updated ${new Date().toLocaleTimeString()}`;
+    render();
+  } catch (e) {
+    $("status").textContent = "scanner not reachable (" + e.message + ")";
+  }
+  clearTimeout(timer);
+  timer = setTimeout(refresh, ((state && state.refresh_seconds) || 3) * 1000);
+}
+$("bankroll").addEventListener("input", () => { store.set("bankroll", $("bankroll").value); render(); });
+$("sport").addEventListener("change", () => { store.set("sport", $("sport").value); render(); });
+const savedSport = store.get("sport");
+if (savedSport) $("sport").append(h("option", { value: savedSport, selected: "" }, savedSport));
+refresh();
+</script>
+</body>
+</html>

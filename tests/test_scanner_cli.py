@@ -242,7 +242,8 @@ def test_cli_config_errors_exit_2(tmp_path, capsys):
 def test_cli_missing_api_key_is_a_clear_error(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("ODDS_API_KEY", raising=False)
     conf = tmp_path / "c.yaml"
-    conf.write_text("storage: {backend: none}\n")
+    off = ", ".join(f"{n}: {{enabled: false}}" for n in ("monacobet", "doxxbet", "nike", "tipos", "synot"))
+    conf.write_text(f"storage: {{backend: none}}\nproviders: {{the_odds_api: {{enabled: true}}, {off}}}\n")
     assert cli.main(["-c", str(conf), "--once"]) == 2
     assert "ODDS_API_KEY" in capsys.readouterr().err
 
@@ -260,7 +261,8 @@ def test_shipped_config_is_valid_and_replay_demo_runs(sample_path, tmp_path, cap
     from odds_scanner.config import load_config
 
     root = Path(__file__).resolve().parent.parent
-    assert load_config(root / "config.yaml").min_profit_percent == 1.0
+    shipped = load_config(root / "config.yaml")
+    assert shipped.min_profit_percent == 0.5 and not shipped.providers["the_odds_api"].enabled
     monkeypatch.chdir(tmp_path)  # so the shipped config's data/ output lands in tmp
     assert cli.main(["-c", str(root / "config.yaml"), "--replay", str(sample_path), "--once"]) == 0
     assert "Jan Kovac" in capsys.readouterr().out

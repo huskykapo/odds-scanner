@@ -160,8 +160,9 @@ class SlovakProvider(OddsProvider):
     site-specific parameter) and implement :meth:`_fetch_payloads` and :meth:`parse`.
 
     ``options`` (from ``config.yaml`` ``providers.<name>.options``) can override the
-    per-sport parameters (e.g. ``sport_ids: {hockey: 67}``) and set ``sample_file`` to replay a
-    saved response instead of calling the site (offline demo / tests).
+    per-sport parameters (e.g. ``sport_ids: {hockey: 67}``) and set ``sample_files`` (sport -> path)
+    to replay saved responses instead of calling the site (offline demo / tests); then only the
+    sports with a sample are polled.
     """
 
     name = "slovak"
@@ -191,9 +192,10 @@ class SlovakProvider(OddsProvider):
         sports = dict(self.DEFAULT_SPORTS)
         sports.update({k: v for k, v in (self.options.get(self.SPORT_OPTION) or {}).items()})
         self.sport_params = {k: v for k, v in sports.items() if v not in (None, "")}
+        self.samples: dict[str, str] = {str(k): str(v) for k, v in (self.options.get("sample_files") or {}).items()}
 
     def supports(self, sport: str) -> bool:
-        return sport in self.sport_params
+        return sport in self.samples if self.samples else sport in self.sport_params
 
     def fetch_odds(
         self,
@@ -208,8 +210,10 @@ class SlovakProvider(OddsProvider):
                 f"{self.title}: no site parameter configured for sport {sport!r} "
                 f"(set providers.{self.name}.options.{self.SPORT_OPTION}.{sport})"
             )
-        sample = self.options.get("sample_file")
-        payloads = [self._load_sample(sample)] if sample else self._fetch_payloads(sport, self.sport_params[sport])
+        if self.samples:
+            payloads = [self._load_sample(self.samples[sport])]
+        else:
+            payloads = self._fetch_payloads(sport, self.sport_params[sport])
         fetched_at = self._clock()
         events: list[Event] = []
         seen: set[str] = set()
@@ -242,7 +246,7 @@ class SlovakProvider(OddsProvider):
         try:
             return json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise ProviderError(f"{self.title}: cannot read sample_file {path}: {exc}") from exc
+            raise ProviderError(f"{self.title}: cannot read sample file {path}: {exc}") from exc
 
     def close(self) -> None:
         self._client.close()

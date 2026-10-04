@@ -234,9 +234,10 @@ def test_throttle_spaces_requests_per_host_at_least_one_second():
     assert sleeps == [1.0]  # min_interval below 1 s is raised to 1 s
 
 
-def test_sample_file_option_replays_a_saved_response(tmp_path):
+def test_sample_files_option_replays_saved_responses(tmp_path):
     import json
     f = tmp_path / "s.json"
     f.write_text(json.dumps(load_sk("doxxbet_football.json")))
-    p = DoxxbetProvider(client=client(FakeSession()), options={"sample_file": str(f)}, clock=lambda: NOW)
+    p = DoxxbetProvider(client=client(FakeSession()), options={"sample_files": {"football": str(f)}}, clock=lambda: NOW)
     assert len(p.fetch_odds("football").events) == 2
+    assert p.supports("football") and not p.supports("hockey")  # only sports with a sample

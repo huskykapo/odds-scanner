@@ -7,8 +7,31 @@ from odds_scanner.errors import ConfigError
 def test_defaults_are_valid():
     cfg = config_from_dict({})
     assert isinstance(cfg, Config)
-    assert cfg.min_profit_percent == 1.0
+    assert cfg.min_profit_percent == 0.5
     assert cfg.provider.api_key_env == "ODDS_API_KEY"
+    # works with no API key at all: Slovak providers on, The Odds API off
+    assert [n for n, p in cfg.providers.items() if p.enabled] == ["monacobet", "doxxbet", "nike", "tipos", "synot"]
+    assert not cfg.providers["the_odds_api"].enabled
+    assert cfg.providers["monacobet"].poll_interval_seconds == 120
+    assert cfg.providers["nike"].poll_interval_seconds == 60
+    assert cfg.dashboard.port == 8765 and cfg.verify_above_percent == 10
+    assert cfg.stake_rounding == 0.5
+
+
+def test_provider_sections_override_defaults_field_by_field():
+    cfg = config_from_dict({
+        "providers": {"nike": {"poll_interval_seconds": 30, "sports": ["football"]}, "doxxbet": {"enabled": False},
+                      "monacobet": {"options": {"league_ids": {"football": [2529497]}}}},
+        "bookmaker_settings": {"doxxbet": {"stake_step": 1, "min_stake": 2, "stake_fee": 5}},
+        "matching": {"aliases": {"Slovan": "ŠK Slovan Bratislava"}},
+    })
+    assert cfg.providers["nike"].poll_interval_seconds == 30 and cfg.providers["nike"].sports == ("football",)
+    assert cfg.providers["nike"].timeout_seconds == 20  # untouched default
+    assert not cfg.providers["doxxbet"].enabled and cfg.providers["tipos"].enabled
+    assert cfg.providers["monacobet"].poll_interval_seconds == 120
+    assert cfg.providers["monacobet"].options["league_ids"]["football"] == [2529497]
+    assert cfg.bookmaker_settings["doxxbet"].stake_fee == 5
+    assert cfg.matching.aliases == {"Slovan": "ŠK Slovan Bratislava"}
 
 
 def test_overrides_and_nested_sections():
@@ -41,6 +64,12 @@ def test_overrides_and_nested_sections():
         ({"min_profit_percent": 5, "max_profit_percent": 2}, "max_profit_percent"),
         ({"log_level": "LOUD"}, "log_level"),
         ("not a mapping", "mapping"),
+        ({"providers": {"tipsport": {}}}, "unknown provider"),
+        ({"providers": {"nike": {"min_request_interval_seconds": 0.5}}}, "at most one request per second"),
+        ({"providers": {"nike": {"pol_interval": 5}}}, "providers.nike.pol_interval"),
+        ({"bookmaker_settings": {"nike": {"win_tax": 150}}}, "percentage"),
+        ({"matching": {"name_threshold": 2}}, "between 0 and 1"),
+        ({"dashboard": {"port": 70000}}, "dashboard.port"),
     ],
 )
 def test_invalid_config_raises_clear_error(data, fragment):

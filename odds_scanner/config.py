@@ -17,7 +17,9 @@ TWO_OR_THREE_WAY_MARKETS = frozenset({"h2h", "h2h_3_way"})
 TWO_WAY_MARKETS = frozenset({"totals", "spreads", "btts", "draw_no_bet"})
 SUPPORTED_MARKETS = TWO_OR_THREE_WAY_MARKETS | TWO_WAY_MARKETS
 
-PROVIDER_NAMES = ("the_odds_api", "replay")
+PROVIDER_NAMES = ("the_odds_api", "replay")  # legacy single-provider mode (--replay)
+SK_SOURCES = ("monacobet", "doxxbet", "nike", "tipos", "synot")
+SOURCE_NAMES = SK_SOURCES + ("the_odds_api",)
 STORAGE_BACKENDS = ("csv", "sqlite", "both", "none")
 
 
@@ -52,6 +54,103 @@ class ProviderConfig:
 
 
 @dataclass(frozen=True)
+class SourceConfig:
+    """One entry under ``providers:`` - an odds source polled in its own background thread."""
+
+    enabled: bool = True
+    poll_interval_seconds: float = 60.0
+    timeout_seconds: float = 20.0
+    max_retries: int = 2
+    retry_backoff_seconds: float = 2.0
+    min_request_interval_seconds: float = 1.0  # per site; values below 1 are refused
+    sports: tuple[str, ...] | None = None  # None = the top-level ``sports`` list
+    options: Mapping[str, Any] = field(default_factory=dict)  # provider-specific, see config.yaml
+
+    def __post_init__(self) -> None:
+        if self.options is None:
+            object.__setattr__(self, "options", {})
+        if not isinstance(self.enabled, bool):
+            raise ConfigError("providers.*.enabled must be true or false")
+        _positive("providers.*.poll_interval_seconds", self.poll_interval_seconds)
+        _positive("providers.*.timeout_seconds", self.timeout_seconds)
+        _positive("providers.*.max_retries", self.max_retries, allow_zero=True)
+        _positive("providers.*.retry_backoff_seconds", self.retry_backoff_seconds, allow_zero=True)
+        _positive("providers.*.min_request_interval_seconds", self.min_request_interval_seconds)
+        if self.min_request_interval_seconds < 1.0:
+            raise ConfigError("providers.*.min_request_interval_seconds must be >= 1 (at most one request per second per site)")
+        if self.sports is not None:
+            _str_list("providers.*.sports", self.sports)
+        if not isinstance(self.options, Mapping):
+            raise ConfigError("providers.*.options must be a mapping")
+
+
+def default_sources() -> dict[str, SourceConfig]:
+    return {
+        # The whole-sport MONACObet feed is ~5 MB: poll it less often (or set options.league_ids).
+        "monacobet": SourceConfig(poll_interval_seconds=120.0),
+        "doxxbet": SourceConfig(),
+        "nike": SourceConfig(),
+        "tipos": SourceConfig(),
+        "synot": SourceConfig(),
+        "the_odds_api": SourceConfig(enabled=False, poll_interval_seconds=600.0, timeout_seconds=15.0, sports=("soccer_epl",)),
+    }
+
+
+@dataclass(frozen=True)
+class BookmakerConfig:
+    """Money rules for one bookmaker (keyed by bookmaker key under ``bookmaker_settings:``)."""
+
+    stake_step: float | None = None  # round stakes to this; None = top-level stake_rounding
+    min_stake: float = 0.0
+    stake_fee: float = 0.0  # percent of each stake the bookmaker keeps
+    win_tax: float = 0.0  # percent of net winnings withheld
+
+    def __post_init__(self) -> None:
+        if self.stake_step is not None:
+            _positive("bookmaker_settings.*.stake_step", self.stake_step)
+        _positive("bookmaker_settings.*.min_stake", self.min_stake, allow_zero=True)
+        for name in ("stake_fee", "win_tax"):
+            value = getattr(self, name)
+            _positive(f"bookmaker_settings.*.{name}", value, allow_zero=True)
+            if value >= 100:
+                raise ConfigError(f"bookmaker_settings.*.{name} is a percentage and must be below 100")
+
+
+@dataclass(frozen=True)
+class MatchingConfig:
+    time_tolerance_minutes: float = 15.0
+    name_threshold: float = 0.8
+    aliases: Mapping[str, str] = field(default_factory=dict)  # bookmaker spelling -> other spelling
+
+    def __post_init__(self) -> None:
+        if self.aliases is None:  # a key whose entries are all commented out
+            object.__setattr__(self, "aliases", {})
+        _positive("matching.time_tolerance_minutes", self.time_tolerance_minutes)
+        _positive("matching.name_threshold", self.name_threshold)
+        if self.name_threshold > 1:
+            raise ConfigError("matching.name_threshold must be between 0 and 1")
+        if not isinstance(self.aliases, Mapping) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in self.aliases.items()
+        ):
+            raise ConfigError("matching.aliases must map names to names")
+
+
+@dataclass(frozen=True)
+class DashboardConfig:
+    enabled: bool = True
+    host: str = "0.0.0.0"  # all interfaces, so a phone on the same Wi-Fi can open it
+    port: int = 8765
+    refresh_seconds: float = 3.0
+    highlight_seconds: float = 120.0  # arbs first seen this recently are highlighted
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.port, int) or isinstance(self.port, bool) or not 0 < self.port < 65536:
+            raise ConfigError(f"dashboard.port must be a TCP port number, got {self.port!r}")
+        _positive("dashboard.refresh_seconds", self.refresh_seconds)
+        _positive("dashboard.highlight_seconds", self.highlight_seconds, allow_zero=True)
+
+
+@dataclass(frozen=True)
 class QuotaConfig:
     backoff_below: int = 100  # remaining requests under which we slow down...
     backoff_multiplier: float = 4.0  # ...by multiplying the poll interval
@@ -69,6 +168,7 @@ class TelegramConfig:
     enabled: bool = False
     token_env: str = "TELEGRAM_BOT_TOKEN"
     chat_id_env: str = "TELEGRAM_CHAT_ID"
+    min_profit_percent: float | None = None  # alert threshold; None = the top-level min_profit_percent
 
 
 @dataclass(frozen=True)
@@ -96,15 +196,17 @@ class StorageConfig:
 
 @dataclass(frozen=True)
 class Config:
-    sports: tuple[str, ...] = ("soccer_epl",)
+    # Slovak providers: football, hockey, basketball, tennis. (Legacy --replay / Odds API mode: sport keys.)
+    sports: tuple[str, ...] = ("football", "hockey", "basketball", "tennis")
     regions: tuple[str, ...] = ("eu", "uk")
     markets: tuple[str, ...] = ("h2h",)
     bookmakers: tuple[str, ...] = ()  # whitelist; empty = all bookmakers
-    min_profit_percent: float = 1.0
+    min_profit_percent: float = 0.5
     max_profit_percent: float | None = 25.0  # above this is almost certainly bad data; None disables
+    verify_above_percent: float | None = 10.0  # shown with a "verify manually" flag above this
     bankroll: float = 1000.0
     currency: str = "EUR"
-    stake_rounding: float = 1.0  # stakes are rounded to a multiple of this
+    stake_rounding: float = 0.5  # stakes are rounded to a multiple of this (per bookmaker: stake_step)
     poll_interval_seconds: float = 300.0
     stale_after_seconds: float = 300.0
     log_level: str = "INFO"
@@ -112,6 +214,10 @@ class Config:
     quota: QuotaConfig = field(default_factory=QuotaConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    providers: Mapping[str, SourceConfig] = field(default_factory=default_sources)
+    bookmaker_settings: Mapping[str, BookmakerConfig] = field(default_factory=dict)
+    matching: MatchingConfig = field(default_factory=MatchingConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
 
     def __post_init__(self) -> None:
         for name in ("sports", "regions", "markets"):
@@ -127,6 +233,8 @@ class Config:
             _positive("max_profit_percent", self.max_profit_percent)
             if self.max_profit_percent < self.min_profit_percent:
                 raise ConfigError("max_profit_percent must be >= min_profit_percent")
+        if self.verify_above_percent is not None:
+            _positive("verify_above_percent", self.verify_above_percent)
         _positive("bankroll", self.bankroll)
         _positive("stake_rounding", self.stake_rounding)
         _positive("poll_interval_seconds", self.poll_interval_seconds)
@@ -154,6 +262,34 @@ def _build(cls: type, data: Any, section: str, nested: Mapping[str, Callable[[An
         raise ConfigError(f"invalid value in '{section or 'config'}': {exc}") from exc
 
 
+def _build_sources(data: Any) -> dict[str, SourceConfig]:
+    """Listed providers override the defaults field by field; unlisted ones keep their defaults."""
+    if data is None:
+        data = {}
+    if not isinstance(data, Mapping):
+        raise ConfigError("'providers' must be a mapping of provider name -> settings")
+    unknown = set(data) - set(SOURCE_NAMES)
+    if unknown:
+        raise ConfigError(f"unknown provider(s) {sorted(unknown)}; known: {', '.join(SOURCE_NAMES)}")
+    sources = default_sources()
+    for name, raw in data.items():
+        if raw is None:
+            continue
+        if not isinstance(raw, Mapping):
+            raise ConfigError(f"providers.{name} must be a mapping")
+        base = {f.name: getattr(sources[name], f.name) for f in fields(SourceConfig)}
+        sources[name] = _build(SourceConfig, {**base, **raw}, f"providers.{name}")
+    return sources
+
+
+def _build_bookmakers(data: Any) -> dict[str, BookmakerConfig]:
+    if data is None:
+        return {}
+    if not isinstance(data, Mapping):
+        raise ConfigError("'bookmaker_settings' must be a mapping of bookmaker key -> settings")
+    return {str(k): _build(BookmakerConfig, v, f"bookmaker_settings.{k}") for k, v in data.items()}
+
+
 def config_from_dict(data: Mapping[str, Any] | None) -> Config:
     """Build a validated :class:`Config` from a parsed YAML mapping (missing keys use defaults)."""
     return _build(
@@ -164,6 +300,10 @@ def config_from_dict(data: Mapping[str, Any] | None) -> Config:
             "provider": lambda v: _build(ProviderConfig, v, "provider"),
             "quota": lambda v: _build(QuotaConfig, v, "quota"),
             "storage": lambda v: _build(StorageConfig, v, "storage"),
+            "providers": _build_sources,
+            "bookmaker_settings": _build_bookmakers,
+            "matching": lambda v: _build(MatchingConfig, v, "matching"),
+            "dashboard": lambda v: _build(DashboardConfig, v, "dashboard"),
             "notifications": lambda v: _build(
                 NotificationConfig,
                 v,
