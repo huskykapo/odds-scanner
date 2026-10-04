@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Sequence
 
-from odds_scanner.arbitrage import FinderSettings, find_arbitrages
+from odds_scanner.arbitrage import FinderSettings, analyze_events
 from odds_scanner.errors import (
     AuthenticationError,
     BlockedError,
@@ -25,7 +25,7 @@ from odds_scanner.errors import (
 )
 from odds_scanner.markets import market_title, outcome_title
 from odds_scanner.matching import MatchSettings, MatchStats, match_events
-from odds_scanner.models import Arbitrage, Event
+from odds_scanner.models import Arbitrage, Event, NearMiss
 from odds_scanner.notifiers.base import Notifier
 from odds_scanner.notifiers.dedupe import DedupeCache
 from odds_scanner.providers.base import OddsProvider
@@ -91,6 +91,8 @@ class LiveEngine:
         dedupe_ttl: timedelta = timedelta(minutes=60),
         currency: str = "EUR",
         dashboard_options: dict[str, Any] | None = None,
+        near_miss_floor: float | None = None,
+        near_miss_limit: int = 50,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self.sources = list(sources)
@@ -108,6 +110,9 @@ class LiveEngine:
             if not s.sports:
                 self.states[s.key].status = "stopped"
                 self.states[s.key].message = "no configured sport for this site"
+        self._near_floor = near_miss_floor or None  # 0 / None = do not compute near misses
+        self._near_limit = near_miss_limit
+        self.near_misses: list[NearMiss] = []
         self._seen = DedupeCache(dedupe_ttl, clock=clock)
         self._first_seen: dict[str, datetime] = {}
         self.arbs: list[Arbitrage] = []
@@ -274,13 +279,14 @@ class LiveEngine:
         with self._lock:
             events = [e for s in self.sources for sport in s.sports for e in self._snapshots.get((s.key, sport), ())]
         merged, stats = match_events(events, self._match)
-        arbs = find_arbitrages(merged, self._settings, now=now)
+        arbs, near = analyze_events(merged, self._settings, now=now, near_miss_floor=self._near_floor)
         first_seen = {a.identity: self._first_seen.get(a.identity, now) for a in arbs}
         new = [a for a in arbs if not self._seen.is_duplicate(a.dedupe_key)]
         for a in new:
             self._seen.remember(a.dedupe_key)
         with self._lock:
             self.arbs, self.stats, self.last_analysis, self._first_seen = arbs, stats, now, first_seen
+            self.near_misses = near[: self._near_limit]
         self._publish(arbs, new)
         return arbs
 
@@ -355,6 +361,44 @@ class LiveEngine:
             "providers": [self.states[s.key].as_dict(s.poll_interval, s.homepage) for s in self.sources],
             "matching": stats.as_dict(),
             "arbs": out_arbs,
+        }
+
+    def near_miss_snapshot(self) -> dict[str, Any]:
+        """JSON state of the /near-misses page: the closest combinations that are not arbs (yet)."""
+        with self._lock:
+            near, analysed = list(self.near_misses), self.last_analysis
+        homepages = {s.key: s.homepage for s in self.sources}
+        items = [
+            {
+                "id": m.identity,
+                "event": m.event_name,
+                "sport": m.sport_key,
+                "start": _iso(m.commence_time),
+                "market_label": market_title(m.market, m.line),
+                "profit": round(m.profit_percent, 3),
+                "legs": [
+                    {
+                        "bookmaker": leg.bookmaker_title,
+                        "outcome_label": outcome_title(leg.outcome, m.home_team, m.away_team, m.line),
+                        "odds": leg.odds,
+                        "effective_odds": leg.effective_odds or leg.odds,
+                        "updated": _iso(leg.odds_updated),
+                        "url": leg.url,
+                        "homepage": homepages.get(leg.bookmaker_key, ""),
+                    }
+                    for leg in m.legs
+                ],
+            }
+            for m in near
+        ]
+        return {
+            "now": _iso(self._clock()),
+            "last_analysis": _iso(analysed),
+            "enabled": self._near_floor is not None,
+            "floor": self._near_floor,
+            "min_profit": self._settings.min_profit_percent,
+            "refresh_seconds": self._dash.get("refresh_seconds", 5),
+            "items": items,
         }
 
     # ------------------------------------------------------------------ threads

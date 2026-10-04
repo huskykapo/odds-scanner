@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Near misses - Arb Scanner</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #66707a; --line: #e2e5e9;
+    --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #0b63ce;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #171b21; --fg: #e6e9ed; --muted: #8c96a1; --line: #2a3038;
+            --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #4c9aff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 16px; margin: 0; flex: 1 1 auto; }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; }
+  .status, .meta { color: var(--muted); font-size: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .intro { color: var(--muted); font-size: 13px; }
+  .head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; align-items: baseline; }
+  .ev { font-weight: 600; font-size: 15px; }
+  .gap { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--warn); }
+  .gap.pos { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 6px; border-top: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); text-decoration: none; }
+  .age-old { color: var(--bad); }
+  .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
+  .disclaimer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Near misses</h1>
+    <a href="/">&larr; Arbitrage opportunities</a>
+    <span class="status" id="status">connecting…</span>
+  </div>
+</header>
+<main>
+  <div class="card intro" id="intro"></div>
+  <div id="list"></div>
+  <p class="disclaimer">These are <b>not</b> profitable bets. A negative number means backing every outcome at these prices
+    would lose that percentage of your total stake. The list only shows how close the market is to an arbitrage.
+    Odds move fast - always check prices on the bookmaker's own site.</p>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function safeUrl(u) {  // third-party data: only plain http(s) links
+  try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; } catch (e) { return null; }
+}
+function ageText(iso, now) {
+  if (!iso) return { text: "-", old: false };
+  const s = Math.max(0, Math.round((now - new Date(iso)) / 1000));
+  const text = s < 90 ? s + "s ago" : Math.round(s / 60) + " min ago";
+  return { text, old: s > 120 };
+}
+function pct(v) { return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + " %"; }
+
+function render(data) {
+  const now = new Date(data.now || Date.now());
+  if (!data.enabled) {
+    $("intro").textContent = "Near misses are switched off. Set near_miss_percent in config.yaml (for example 3) and restart.";
+    $("list").replaceChildren();
+    $("status").textContent = "off";
+    return;
+  }
+  $("intro").textContent =
+    "The closest combinations of the best prices from different bookmakers that are NOT profitable arbitrages yet " +
+    "(arbitrage threshold: " + data.min_profit + " %, shown down to a " + data.floor + " % loss). " +
+    "0 % would be break-even; the closer to 0, the closer the market is to an arbitrage.";
+  $("status").textContent = data.last_analysis ? "updated " + new Date(data.last_analysis).toLocaleTimeString() : "waiting for data…";
+
+  const list = $("list");
+  if (!data.items.length) {
+    list.replaceChildren(el("div", "card empty", "No close combinations right now."));
+    return;
+  }
+  list.replaceChildren(...data.items.map((m) => {
+    const card = el("div", "card");
+    const head = el("div", "head");
+    const left = el("div");
+    left.append(el("div", "ev", m.event));
+    left.append(el("div", "meta", [m.sport, m.market_label, new Date(m.start).toLocaleString()].join(" · ")));
+    head.append(left, el("div", "gap" + (m.profit > 0 ? " pos" : ""), pct(m.profit)));
+    const table = el("table");
+    const thead = el("thead"), hr = el("tr");
+    [["Bet", ""], ["Odds", "num"], ["Bookmaker", ""], ["Price age", ""]].forEach(([t, c]) => hr.append(el("th", c, t)));
+    thead.append(hr);
+    const tbody = el("tbody");
+    m.legs.forEach((l) => {
+      const tr = el("tr");
+      const odds = l.effective_odds !== l.odds ? l.odds.toFixed(2) + " (net " + l.effective_odds.toFixed(2) + ")" : l.odds.toFixed(2);
+      const bm = el("td");
+      const href = safeUrl(l.url || l.homepage);
+      if (href) { const a = el("a", "", l.bookmaker); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; bm.append(a); }
+      else bm.textContent = l.bookmaker;
+      const age = ageText(l.updated, now);
+      tr.append(el("td", "", l.outcome_label), el("td", "num", odds), bm, el("td", age.old ? "age-old" : "", age.text));
+      tbody.append(tr);
+    });
+    table.append(thead, tbody);
+    card.append(head, table);
+    return card;
+  }));
+}
+
+async function tick() {
+  let wait = 5000;
+  try {
+    const r = await fetch("/api/near-misses", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    render(data);
+    wait = Math.max(3, data.refresh_seconds || 5) * 1000;
+  } catch (e) {
+    $("status").textContent = "connection lost - retrying…";
+  }
+  setTimeout(tick, wait);
+}
+tick();
+</script>
+</body>
+</html>

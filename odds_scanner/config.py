@@ -205,6 +205,7 @@ class Config:
     min_profit_percent: float = 0.5
     max_profit_percent: float | None = 25.0  # above this is almost certainly bad data; None disables
     verify_above_percent: float | None = 10.0  # shown with a "verify manually" flag above this
+    near_miss_percent: float = 3.0  # also list the closest non-arbs, down to this % loss; 0 turns it off
     bankroll: float = 1000.0
     currency: str = "EUR"
     stake_rounding: float = 0.5  # stakes are rounded to a multiple of this (per bookmaker: stake_step)
@@ -236,6 +237,7 @@ class Config:
                 raise ConfigError("max_profit_percent must be >= min_profit_percent")
         if self.verify_above_percent is not None:
             _positive("verify_above_percent", self.verify_above_percent)
+        _positive("near_miss_percent", self.near_miss_percent, allow_zero=True)
         _positive("bankroll", self.bankroll)
         _positive("stake_rounding", self.stake_rounding)
         _positive("poll_interval_seconds", self.poll_interval_seconds)

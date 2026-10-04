@@ -8,6 +8,7 @@ sports: [football, hockey, basketball, tennis]
 # ---- arbitrage rules ---------------------------------------------------------------------
 min_profit_percent: 0.5     # ignore arbs below this guaranteed profit %
 verify_above_percent: 10    # show arbs above this with a "VERIFY MANUALLY" flag (often a pricing error)
+near_miss_percent: 3        # /near-misses page: closest combinations that are not arbs yet, down to a 3 % loss (0 = off)
 max_profit_percent: 25      # above this it is almost always bad/stale data: dropped. null disables
 bankroll: 100               # total amount split across the legs of each arb (the dashboard can change it)
 currency: EUR               # display only

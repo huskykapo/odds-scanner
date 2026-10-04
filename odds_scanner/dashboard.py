@@ -17,10 +17,15 @@ from typing import Any, Callable
 log = logging.getLogger(__name__)
 
 PAGE = Path(__file__).with_name("dashboard.html")
+NEAR_PAGE = Path(__file__).with_name("near_misses.html")
 
 
 def make_handler(
-    get_state: Callable[[], dict[str, Any]], page: bytes, get_history: Callable[[], Any] | None = None
+    get_state: Callable[[], dict[str, Any]],
+    page: bytes,
+    get_history: Callable[[], Any] | None = None,
+    get_near_misses: Callable[[], Any] | None = None,
+    near_page: bytes | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "odds-scanner"
@@ -29,8 +34,15 @@ def make_handler(
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", page)
-            elif path in ("/api/state", "/api/history"):
-                source = get_state if path == "/api/state" else (get_history or (lambda: []))
+            elif path == "/near-misses" and near_page is not None and get_near_misses is not None:
+                self._send(200, "text/html; charset=utf-8", near_page)
+            elif path in ("/api/state", "/api/history") or (path == "/api/near-misses" and get_near_misses is not None):
+                if path == "/api/state":
+                    source = get_state
+                elif path == "/api/history":
+                    source = get_history or (lambda: [])
+                else:
+                    source = get_near_misses  # type: ignore[assignment]
                 try:
                     body = json.dumps(source(), ensure_ascii=False).encode("utf-8")
                 except Exception:  # noqa: BLE001
@@ -65,8 +77,12 @@ class Dashboard:
         host: str = "0.0.0.0",
         port: int = 8765,
         get_history: Callable[[], Any] | None = None,
+        get_near_misses: Callable[[], Any] | None = None,
     ) -> None:
-        self._server = ThreadingHTTPServer((host, port), make_handler(get_state, PAGE.read_bytes(), get_history))
+        near_page = NEAR_PAGE.read_bytes() if get_near_misses is not None else None
+        self._server = ThreadingHTTPServer(
+            (host, port), make_handler(get_state, PAGE.read_bytes(), get_history, get_near_misses, near_page)
+        )
         self._server.daemon_threads = True
         self._thread: threading.Thread | None = None
 
