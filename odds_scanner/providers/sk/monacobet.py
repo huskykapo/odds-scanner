@@ -42,6 +42,8 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://ibet-monaco.dualsoft.bet/restapi/offer/sk"
 QUERY = {"annex": "4", "mobileVersion": "2.3.22", "locale": "sk"}
+DETAIL_QUERY = {"annex": "4", "desktopVersion": "2.3.22", "locale": "sk"}
+NAMES_URL = f"{BASE_URL}/ttg_lang"  # names of every tip type (bet) code
 
 DEFAULT_TIP_TYPES = {"1": "1", "2": "X", "3": "2", "227": OVER, "228": UNDER}
 
@@ -92,6 +94,14 @@ class MonacobetProvider(SlovakProvider):
     homepage = "https://www.monacobet.sk"
     SPORT_OPTION = "sport_codes"
     DEFAULT_SPORTS = {"football": "S", "hockey": "H", "basketball": "B", "tennis": "T"}
+
+    def fetch_detail_raw(self, event_id: Any) -> Any:
+        """The match page's full bet list, as the site sends it."""
+        return self._client.get_json(f"{BASE_URL}/match/{int(event_id)}", DETAIL_QUERY)
+
+    def fetch_names_raw(self) -> Any:
+        """MONACObet's dictionary of bet names per tip type code."""
+        return self._client.get_json(NAMES_URL, {"desktopVersion": "2.3.22", "locale": "sk"})
 
     def _fetch_payloads(self, sport: str, code: Any) -> list[Any]:
         leagues = (self.options.get("league_ids") or {}).get(sport)

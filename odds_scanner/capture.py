@@ -43,6 +43,8 @@ def _save_details(z: zipfile.ZipFile, src: Source, payloads: list, sport: str, n
         variants = [("", {})]
         if i == 0 and sport == "football" and src.key in ("tipos", "synot"):
             variants.append(("_longpolling", {"long_polling": True}))  # the site's own page sends True
+        if i == 0 and src.key == "nike":  # is the page's boxId needed? does it hide bets?
+            variants += [("_nobox", {"box": False}), ("_all", {"hide_collapsed": False})]
         for suffix, kwargs in variants:
             try:
                 raw = fetch(native, **kwargs)
@@ -74,6 +76,13 @@ def capture(
             provider = src.provider
             if not isinstance(provider, SlovakProvider) or provider.samples:
                 continue
+            names = getattr(provider, "fetch_names_raw", None)
+            if names is not None:
+                try:
+                    z.writestr(f"{src.key}/bet_names.json", json.dumps(names(), ensure_ascii=False))
+                    out(f"{src.title:10}  saved the bet name dictionary")
+                except ProviderError as exc:
+                    out(f"{src.title:10}  bet names: ERROR {exc}")
             for sport in src.sports:
                 try:
                     payloads = provider._fetch_payloads(sport, provider.sport_params[sport])  # noqa: SLF001

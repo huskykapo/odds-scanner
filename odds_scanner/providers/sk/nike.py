@@ -24,6 +24,8 @@ from odds_scanner.providers.sk.common import SlovakProvider, make_event
 log = logging.getLogger(__name__)
 
 URL = "https://www.nike.sk/api-gw/nikeone/v1/boxes/search/portal"
+DETAIL_URL = "https://www.nike.sk/api-gw/nikeone/v1/boxes/extended/sport-event-id"  # one match's full bet list
+DETAIL_BOX = "bi-1-1304-17378"  # as sent by the site's match page (2026-10-04)
 QUERY = "betNumbers&date&live=false&menu={menu}&minutes&order&prematch=true&results=false"
 MATCH_HEADER = "zápas"
 WINNER_HEADER = "víťaz zápasu"  # tennis: two-way match winner
@@ -45,6 +47,14 @@ class NikeProvider(SlovakProvider):
     homepage = "https://www.nike.sk"
     SPORT_OPTION = "menus"
     DEFAULT_SPORTS = {"football": "/futbal", "hockey": "/hokej", "basketball": "/basketbal", "tennis": "/tenis"}
+
+    def fetch_detail_raw(self, event_id: Any, box: bool = True, hide_collapsed: bool = True) -> Any:
+        """The match page's full bet list, as the site sends it."""
+        params = {"hideCollapsedMarkets": "true" if hide_collapsed else "false", "sportEventId": str(event_id),
+                  "ts": str(int(self._clock().timestamp() * 1000))}
+        if box:
+            params = {"boxId": self.options.get("detail_box", DETAIL_BOX), **params}
+        return self._client.get_json(DETAIL_URL, params)
 
     def _url(self, menu: str, page: int) -> str:
         url = f"{URL}?{QUERY.format(menu=quote(menu, safe='/'))}"

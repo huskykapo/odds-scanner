@@ -101,3 +101,29 @@ def test_capture_saves_match_pages_of_other_sports_too(tmp_path):
     path = capture([Source("doxxbet", "DOXXbet", doxx, ["hockey"], 60)], lambda l: None, tmp_path, later)
     names = set(zipfile.ZipFile(path).namelist())
     assert {"doxxbet/hockey_detail_80003338.json", "doxxbet/hockey_detail_80003323.json"} <= names
+
+
+def test_nike_and_monacobet_match_page_requests():
+    from odds_scanner.providers.sk import MonacobetProvider, NikeProvider
+
+    calls = []
+
+    class Rec(Site):
+        def get(self, url, params=None, timeout=None):
+            calls.append((url, dict(params or {})))
+            return FakeResponse(json_body={})
+
+    def cl():
+        return SiteClient("T", session=Rec(lambda: None), sleep=lambda s: None, throttle=HostThrottle(), max_retries=0)
+
+    NikeProvider(client=cl(), clock=lambda: NOW).fetch_detail_raw(1017181621)
+    NikeProvider(client=cl(), clock=lambda: NOW).fetch_detail_raw(5, box=False, hide_collapsed=False)
+    MonacobetProvider(client=cl(), clock=lambda: NOW).fetch_detail_raw(513503388)
+    MonacobetProvider(client=cl(), clock=lambda: NOW).fetch_names_raw()
+    (u1, p1), (u2, p2), (u3, p3), (u4, p4) = calls
+    assert u1 == "https://www.nike.sk/api-gw/nikeone/v1/boxes/extended/sport-event-id"
+    assert p1["boxId"] == "bi-1-1304-17378" and p1["sportEventId"] == "1017181621" and p1["hideCollapsedMarkets"] == "true"
+    assert p1["ts"] == str(int(NOW.timestamp() * 1000))
+    assert "boxId" not in p2 and p2["hideCollapsedMarkets"] == "false"
+    assert u3 == "https://ibet-monaco.dualsoft.bet/restapi/offer/sk/match/513503388" and p3["annex"] == "4"
+    assert u4.endswith("/ttg_lang") and p4["locale"] == "sk"
