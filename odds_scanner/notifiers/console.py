@@ -17,6 +17,11 @@ def money(value: float) -> str:
     return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
 
 
+def money2(value: float) -> str:
+    """Always two decimals (payouts, totals, profit), so columns line up."""
+    return f"{value:,.2f}"
+
+
 def market_label(arb: Arbitrage) -> str:
     if arb.line is None:
         label = arb.market
@@ -42,7 +47,7 @@ def _rows(arb: Arbitrage) -> list[list[str]]:
                 f"{leg.odds:.2f}",
                 leg.bookmaker_title,
                 money(leg.stake),
-                money(leg.payout),
+                money2(leg.payout),
             ]
         )
     return rows
@@ -71,7 +76,7 @@ def format_arb_table(arbs: Sequence[Arbitrage], currency: str = "") -> str:
     for arb, block in zip(arbs, blocks):
         lines.extend(fmt(r) for r in block)
         unit = f" {currency}" if currency else ""
-        lines.append(f"  -> total stake {money(arb.total_stake)}{unit}, guaranteed profit {money(arb.guaranteed_profit)}{unit}")
+        lines.append(f"  -> total stake {money2(arb.total_stake)}{unit}, guaranteed profit {money2(arb.guaranteed_profit)}{unit}")
         lines.append(rule)
     return "\n".join(lines)
 

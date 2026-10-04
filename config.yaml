@@ -1,0 +1,61 @@
+# Odds scanner configuration. Secrets are NEVER stored here - they come from environment variables.
+
+# ---- what to scan ------------------------------------------------------------------------
+# Sport keys: https://the-odds-api.com/sports-odds-data/sports-apis.html (or GET /v4/sports).
+# Tennis keys are per tournament (e.g. tennis_atp_us_open) and only return data while it runs.
+sports:
+  - soccer_epl
+  - basketball_nba
+
+regions: [eu]           # us, us2, uk, au, eu
+markets: [h2h, totals]  # supported: h2h, h2h_3_way, totals, spreads, btts, draw_no_bet
+
+# Only consider these bookmakers (Odds API bookmaker keys). Empty list = all of them.
+bookmakers: []
+
+# ---- arbitrage rules ---------------------------------------------------------------------
+min_profit_percent: 1.0   # ignore arbs below this guaranteed profit %
+max_profit_percent: 25.0  # arbs above this are almost always bad/stale data; null disables
+bankroll: 1000            # total amount to split across the legs of each arb
+currency: EUR             # display only
+stake_rounding: 1.0       # round stakes to a multiple of this (1.0 = whole units, 0.01 = cents)
+
+# ---- timing ------------------------------------------------------------------------------
+# Each poll costs  (number of markets) x (number of regions)  API credits PER SPORT.
+# With the settings above that is 2 x 1 x 2 sports = 4 credits per poll: the free tier
+# (500 credits/month) lasts ~125 polls, i.e. about a day at 600s. Use fewer sports/markets
+# or a longer interval to stretch it.
+poll_interval_seconds: 600
+stale_after_seconds: 300  # ignore prices whose last_update is older than this
+
+# ---- quota protection --------------------------------------------------------------------
+quota:
+  backoff_below: 100      # when this few requests remain...
+  backoff_multiplier: 4   # ...poll this many times slower
+  stop_below: 10          # ...and stop entirely rather than go under this
+
+# ---- notifications -----------------------------------------------------------------------
+notifications:
+  console: true
+  telegram:
+    enabled: false
+    token_env: TELEGRAM_BOT_TOKEN   # name of the env var holding the bot token
+    chat_id_env: TELEGRAM_CHAT_ID   # name of the env var holding the chat id
+  dedupe_ttl_minutes: 60            # don't re-send an identical arb within this window
+  max_per_cycle: 10                 # cap on Telegram messages per poll
+
+# ---- logging every arb found ---------------------------------------------------------------
+storage:
+  backend: csv            # csv | sqlite | both | none
+  csv_path: data/arbs.csv
+  sqlite_path: data/arbs.db
+
+# ---- data source -------------------------------------------------------------------------
+provider:
+  name: the_odds_api      # the_odds_api | replay
+  api_key_env: ODDS_API_KEY
+  timeout_seconds: 15
+  max_retries: 2
+  # replay_file: sample_data/sample_odds.json   (used when name is "replay")
+
+log_level: INFO

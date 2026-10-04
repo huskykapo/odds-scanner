@@ -32,7 +32,7 @@ def test_sample_data_finds_exactly_the_real_arbs(sample_events):
 
 def test_results_sorted_by_profit_descending(sample_events):
     arbs = run(sample_events.values())
-    pcts = [a.profit_percent for a in arbs]
+    pcts = [a.realized_profit_percent for a in arbs]
     assert pcts == sorted(pcts, reverse=True)
     assert [a.event_id for a in arbs][-2:] == ["evt_football_arb", "evt_nba_totals"]  # 2.89 %, 2.44 %
 

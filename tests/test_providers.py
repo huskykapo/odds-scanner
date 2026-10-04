@@ -187,3 +187,35 @@ def test_bad_payloads_raise_provider_error():
         make(FakeSession(FakeResponse(200, text_json=False))).fetch_odds("s", **KW)
     with pytest.raises(ProviderError, match="expected a JSON list"):
         make(FakeSession(FakeResponse(200, {"message": "hi"}))).fetch_odds("s", **KW)
+
+
+def test_live_provider_over_real_http_never_logs_api_key(caplog):
+    """Real `requests` against a local server: quota headers parse, and DEBUG logs stay key-free."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from odds_scanner import cli
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Requests-Remaining", "321")
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        cli.setup_logging("DEBUG")  # the CLI's guard keeps urllib3 (which logs full URLs) quiet
+        caplog.set_level(logging.DEBUG)
+        provider = TheOddsApiProvider("TOPSECRETKEY", base_url=f"http://127.0.0.1:{server.server_port}/v4")
+        result = provider.fetch_odds("soccer_epl", **KW)
+    finally:
+        server.shutdown()
+    assert result.quota.remaining == 321
+    assert "TOPSECRETKEY" not in caplog.text
+    assert "remaining=321" in caplog.text

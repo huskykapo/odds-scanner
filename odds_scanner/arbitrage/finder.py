@@ -128,7 +128,7 @@ def _best_legs(
 def find_arbitrages(
     events: Iterable[Event], settings: FinderSettings, *, now: datetime | None = None
 ) -> list[Arbitrage]:
-    """Return arbitrages across ``events``, best profit first."""
+    """Return arbitrages across ``events``, best (post-rounding) profit % first."""
     now = now or datetime.now(timezone.utc)
     found: list[Arbitrage] = []
     for event in events:
@@ -139,7 +139,7 @@ def find_arbitrages(
             arb = _arb_for_group(event, market_key, line, books, settings, now)
             if arb is not None:
                 found.append(arb)
-    found.sort(key=lambda a: (-a.profit_percent, a.event_name, a.market))
+    found.sort(key=lambda a: (-a.realized_profit_percent, a.event_name, a.market))
     return found
 
 

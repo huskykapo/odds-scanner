@@ -23,6 +23,10 @@ class QuotaExhaustedError(ProviderError):
     """The provider's request quota is used up. Retrying will not help."""
 
 
+class QuotaLowError(ProviderError):
+    """We chose to stop polling because the remaining request quota is below the safety floor."""
+
+
 class RateLimitError(ProviderError):
     """The provider throttled us (HTTP 429). Wait ``retry_after`` seconds, if known."""
 

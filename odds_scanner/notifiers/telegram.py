@@ -13,7 +13,7 @@ import requests
 from odds_scanner.errors import ConfigError, NotificationError
 from odds_scanner.models import Arbitrage
 from odds_scanner.notifiers.base import Notifier
-from odds_scanner.notifiers.console import market_label, money
+from odds_scanner.notifiers.console import market_label, money, money2
 from odds_scanner.notifiers.dedupe import DedupeCache
 
 log = logging.getLogger(__name__)
@@ -32,10 +32,10 @@ def format_message(arb: Arbitrage, currency: str = "") -> str:
     for leg in arb.legs:
         lines.append(
             f"- {html.escape(leg.outcome)} @ <b>{leg.odds:.2f}</b> on {html.escape(leg.bookmaker_title)}: "
-            f"stake {money(leg.stake)}{unit} (pays {money(leg.payout)}{unit})"
+            f"stake {money(leg.stake)}{unit} (pays {money2(leg.payout)}{unit})"
         )
     lines.append(
-        f"Total stake {money(arb.total_stake)}{unit}, guaranteed profit {money(arb.guaranteed_profit)}{unit}"
+        f"Total stake {money2(arb.total_stake)}{unit}, guaranteed profit {money2(arb.guaranteed_profit)}{unit}"
     )
     lines.append("<i>Odds move fast - verify every price before acting.</i>")
     return "\n".join(lines)

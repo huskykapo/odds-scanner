@@ -52,6 +52,13 @@ class ReplayProvider(OddsProvider):
         if not isinstance(self._raw, (list, dict)):
             raise ProviderError(f"replay file {self._path} must contain a JSON list or object")
 
+    def sport_keys(self) -> list[str]:
+        """Sport keys present in the file, in first-seen order."""
+        if isinstance(self._raw, dict):
+            return list(self._raw)
+        keys = (e.get("sport_key") for e in self._raw if isinstance(e, dict))
+        return list(dict.fromkeys(k for k in keys if isinstance(k, str)))
+
     def fetch_odds(
         self,
         sport: str,
