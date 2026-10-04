@@ -136,6 +136,27 @@ class MatchingConfig:
 
 
 @dataclass(frozen=True)
+class DetailsConfig:
+    """Match pages (over/under, handicaps, both teams to score ...) of DOXXbet, Tipos and Synot."""
+
+    enabled: bool = True
+    sports: tuple[str, ...] = ("football",)  # bet mapping verified for football
+    horizon_hours: float = 24.0  # only matches starting within this many hours
+    refresh_seconds: float = 240.0  # re-fetch each match page this often
+    pause_seconds: float = 3.0  # wait between two match pages of the same site
+    max_matches: int = 150  # per site, soonest kick-off first
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ConfigError("details.enabled must be true or false")
+        _str_list("details.sports", self.sports)
+        _positive("details.horizon_hours", self.horizon_hours)
+        _positive("details.refresh_seconds", self.refresh_seconds)
+        _positive("details.pause_seconds", self.pause_seconds, allow_zero=True)
+        _positive("details.max_matches", self.max_matches)
+
+
+@dataclass(frozen=True)
 class DashboardConfig:
     enabled: bool = True
     host: str = "0.0.0.0"  # all interfaces, so a phone on the same Wi-Fi can open it
@@ -220,6 +241,7 @@ class Config:
     bookmaker_settings: Mapping[str, BookmakerConfig] = field(default_factory=dict)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
+    details: DetailsConfig = field(default_factory=DetailsConfig)
 
     def __post_init__(self) -> None:
         for name in ("sports", "regions", "markets"):
@@ -307,6 +329,7 @@ def config_from_dict(data: Mapping[str, Any] | None) -> Config:
             "bookmaker_settings": _build_bookmakers,
             "matching": lambda v: _build(MatchingConfig, v, "matching"),
             "dashboard": lambda v: _build(DashboardConfig, v, "dashboard"),
+            "details": lambda v: _build(DetailsConfig, v, "details"),
             "notifications": lambda v: _build(
                 NotificationConfig,
                 v,

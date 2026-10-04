@@ -97,7 +97,7 @@ def read_history(
         for leg in best["legs"]:
             item = {
                 **leg,
-                "outcome_label": outcome_title(leg["outcome"], home or None, away or None, best["line"]),
+                "outcome_label": outcome_title(leg["outcome"], home or None, away or None, best["line"], best["market"]),
                 "effective_odds": leg["odds"],
             }
             if leg_extras:

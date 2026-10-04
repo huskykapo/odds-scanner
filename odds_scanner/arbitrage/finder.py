@@ -41,6 +41,9 @@ from odds_scanner.markets import (
     DC_CODES,
     DC_PAIRS,
     DOUBLE_CHANCE,
+    EXTRA_TWO_WAY,
+    LINE_MARKETS,
+    THREE_WAY_ONLY,
     DRAW as DRAW_CODE,
     H2H_3_WAY,
     HOME,
@@ -55,7 +58,7 @@ log = logging.getLogger(__name__)
 DRAW = "Draw"
 
 PAIR_MARKETS = frozenset(DC_PAIRS)  # derived double-chance pairs: partial bookmakers allowed
-_FINDER_MARKETS = TWO_OR_THREE_WAY_MARKETS | TWO_WAY_MARKETS
+_FINDER_MARKETS = TWO_OR_THREE_WAY_MARKETS | TWO_WAY_MARKETS | EXTRA_TWO_WAY | THREE_WAY_ONLY
 
 
 @dataclass(frozen=True)
@@ -113,7 +116,7 @@ def _line_for(market_key: str, name: str, point: float | None, event: Event) -> 
         if name == event.away_team:
             return True, round(-point, 3)
         return False, None
-    if market_key == "totals":
+    if market_key in LINE_MARKETS:
         return (point is not None), (round(point, 3) if point is not None else None)
     return True, None
 
@@ -273,7 +276,7 @@ def _best_combo(event: Event, market_key: str, books: dict[str, _Quote]) -> _Com
             return None
         complete = books  # each side alone is a real price; the pair itself is exhaustive
     else:
-        allowed = (2, 3) if base in TWO_OR_THREE_WAY_MARKETS else (2,)
+        allowed = (2, 3) if base in TWO_OR_THREE_WAY_MARKETS else (3,) if base in THREE_WAY_ONLY else (2,)
         if len(names) not in allowed:
             log.debug("%s/%s: %d distinct outcomes %s, not a complete market; skipping", event.id, market_key, len(names), names)
             return None

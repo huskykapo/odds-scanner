@@ -14,7 +14,7 @@ from odds_scanner import __version__
 from odds_scanner.arbitrage import BookRule, FinderSettings
 from odds_scanner.config import Config, load_config
 from odds_scanner.discovery import DiscoveryCache
-from odds_scanner.engine import LiveEngine, Source
+from odds_scanner.engine import DetailSettings, LiveEngine, Source
 from odds_scanner.errors import ConfigError, OddsScannerError
 from odds_scanner.matching import MatchSettings
 from odds_scanner.notifiers import ConsoleNotifier, DedupeCache, Notifier, TelegramNotifier, format_arb_table
@@ -150,6 +150,14 @@ def build_engine(cfg: Config) -> LiveEngine:
         logs=build_logs(cfg),
         dedupe_ttl=timedelta(minutes=cfg.notifications.dedupe_ttl_minutes),
         currency=cfg.currency,
+        detail_settings=DetailSettings(
+            enabled=cfg.details.enabled,
+            sports=frozenset(cfg.details.sports),
+            horizon=timedelta(hours=cfg.details.horizon_hours),
+            refresh=timedelta(seconds=cfg.details.refresh_seconds),
+            pause_seconds=cfg.details.pause_seconds,
+            max_matches=cfg.details.max_matches,
+        ),
         near_miss_floor=cfg.near_miss_percent or None,
         dashboard_options={
             "refresh_seconds": cfg.dashboard.refresh_seconds,

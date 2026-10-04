@@ -193,6 +193,37 @@ Every bookmaker's odds are mapped to the same keys before comparing:
 * Suspended, locked or disabled odds and odds ≤ 1.01 are skipped. A 1X2 missing one outcome is
   dropped entirely, so a suspended draw can never turn into a fake two-way arb.
 
+### Match pages: every bet type that can form a safe arb (football)
+
+The bookmakers' lists only carry the main result. For football matches offered by **2+ bookmakers
+that start within 24 hours**, the app also opens the match page on DOXXbet, Tipos and Synot
+(`details:` in `config.yaml`: one extra request per match, refreshed every 4 minutes, 3 s apart per
+site). MONACObet sends these bets in its list already. Compared, for the whole match and, where
+offered, the 1st / 2nd half separately:
+
+| Bet | DOXXbet (Betradar id) | Tipos / Synot (code) | MONACObet (tip type) |
+|---|---|---|---|
+| 1X2, double chance | uf:1, uf:60, uf:83 | 19, 20, 64 | 1-3, 4-6 |
+| Draw no bet | uf:11, uf:64, uf:86 | 21 | – |
+| Over/under goals | uf:18, uf:68, uf:90 | 25, 69, 89 | 227/228, 229/230 |
+| Home / away team goals over/under | uf:19/20, 69/70, 91/92 | 27/28, 70/71, 90/91 | 355-358, 371-374 |
+| Both teams to score | uf:29, uf:75, uf:95 | 36, 74, 94 | 272/273 |
+| Odd/even goals | uf:26, uf:74, uf:94 | 33 | – |
+| Handicap (two-way, ±0.5, ±1, ±1.5 ...) | uf:16, uf:66, uf:88 | 24, 68 | – |
+| 3-way handicap (0:1, 1:0 ...) | uf:14, uf:65, uf:87 | 22, 169 | – |
+| First goal (1 / no goal / 2) | uf:8 | 79 | – |
+| Most corners | uf:162 | 209 | – |
+
+Every mapping was checked against real captured odds of the same matches at different bookmakers
+(a swapped over/under or handicap sign would show up as a large fake arb). Not compared on
+purpose: goalscorer / player bets (no bookmaker offers the opposite side), combined bets
+("1x2 a počet gólov", multigóly, ...: outcomes overlap or are split differently), card markets
+(bookmakers count cards differently) and quarter lines (x.25 / x.75, which split the stake).
+Whole-number lines (handicap -1, over 2.0) can refund ("push") and are flagged *push risk*.
+
+`py start.py capture` saves the raw lists plus five match pages per site into a ZIP - send it to a
+developer when a site changes its format.
+
 ### Event matching (`odds_scanner/matching.py`)
 
 1. Same **Betradar match id** on both sides (MONACObet, DOXXbet, Tipos, Synot) => same match.

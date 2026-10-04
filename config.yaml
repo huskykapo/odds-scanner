@@ -61,6 +61,18 @@ regions: [eu]
 markets: [h2h, totals]
 bookmakers: []
 
+# ---- match pages: over/under, handicaps, both teams to score, halves ... -------------------
+# The lists only carry the main result. For matches offered by 2+ bookmakers that start soon,
+# the app also opens each match page on DOXXbet, Tipos and Synot (one extra request per match),
+# and compares every bet type that can form a safe arb. MONACObet sends these in its list.
+details:
+  enabled: true
+  sports: [football]        # bet mapping verified for football
+  horizon_hours: 24         # only matches starting within this many hours
+  refresh_seconds: 240      # re-read each match page this often (prices older than 300 s are ignored)
+  pause_seconds: 3          # wait between two match pages of the same site
+  max_matches: 150          # per site, soonest kick-off first
+
 # ---- per-bookmaker money rules -------------------------------------------------------------
 # stake_step: round stakes to this (EUR). min_stake: the bookmaker's minimum bet.
 # stake_fee / win_tax: percent taken from the stake / from net winnings - applied BEFORE prices

@@ -16,14 +16,44 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import re
 import secrets
 from datetime import datetime
 from typing import Any, Iterator
 
 from odds_scanner.errors import ProviderError
-from odds_scanner.markets import usable_price
-from odds_scanner.models import Event
-from odds_scanner.providers.sk.common import SlovakProvider, betradar_digits, epoch_ms_to_utc, make_event, split_teams
+from odds_scanner.markets import (
+    BTTS,
+    DRAW_NO_BET,
+    EVEN,
+    FIRST_GOAL,
+    FIRST_HALF,
+    H2H_3_WAY,
+    HANDICAP,
+    HANDICAP_3WAY,
+    MOST_CORNERS,
+    NO,
+    ODD,
+    ODD_EVEN,
+    OVER,
+    SECOND_HALF,
+    TEAM_TOTALS_AWAY,
+    TEAM_TOTALS_HOME,
+    TOTALS,
+    UNDER,
+    YES,
+    usable_price,
+)
+from odds_scanner.models import Event, MarketOdds
+from odds_scanner.providers.sk.common import (
+    SlovakProvider,
+    betradar_digits,
+    epoch_ms_to_utc,
+    group_markets,
+    half_line,
+    make_event,
+    split_teams,
+)
 from odds_scanner.providers.sk.protobuf import Message
 
 log = logging.getLogger(__name__)
@@ -114,6 +144,98 @@ def parse_events(payload: Any, sport: str, fetched_at: datetime, *, bookmaker: s
     return events
 
 
+# Match-detail markets by the platform's market code (the part of field 1 before "d") ->
+# (market, period, kind). Same codes on Tipos and Synot. Checked against DOXXbet for the same
+# Betradar matches (captured 2026-10-04). Football.
+DETAIL_MARKETS = {
+    "19": (H2H_3_WAY, None, "1x2"), "20": (H2H_3_WAY, None, "1x2"), "64": (H2H_3_WAY, FIRST_HALF, "1x2"),
+    "21": (DRAW_NO_BET, None, "12"),
+    "25": (TOTALS, None, "ou"), "69": (TOTALS, FIRST_HALF, "ou"), "89": (TOTALS, SECOND_HALF, "ou"),
+    "27": (TEAM_TOTALS_HOME, None, "ou"), "28": (TEAM_TOTALS_AWAY, None, "ou"),
+    "70": (TEAM_TOTALS_HOME, FIRST_HALF, "ou"), "71": (TEAM_TOTALS_AWAY, FIRST_HALF, "ou"),
+    "90": (TEAM_TOTALS_HOME, SECOND_HALF, "ou"), "91": (TEAM_TOTALS_AWAY, SECOND_HALF, "ou"),
+    "36": (BTTS, None, "yn"), "74": (BTTS, FIRST_HALF, "yn"), "94": (BTTS, SECOND_HALF, "yn"),
+    "33": (ODD_EVEN, None, "oe"),
+    "24": (HANDICAP, None, "hcp2"), "68": (HANDICAP, FIRST_HALF, "hcp2"),
+    "22": (HANDICAP_3WAY, None, "hcp3"), "169": (HANDICAP_3WAY, FIRST_HALF, "hcp3"),
+    "79": (FIRST_GOAL, None, "1x2"),
+    "209": (MOST_CORNERS, None, "1x2"),
+}
+_DETAIL_TIPS = {
+    "1x2": {"1": "1", "0": "X", "X": "X", "2": "2", "10": "1X", "1X": "1X", "12": "12", "02": "X2", "X2": "X2"},
+    "12": {"1": "1", "2": "2"},
+    "yn": {"ÁNO": YES, "NIE": NO},
+    "oe": {"NEPÁR": ODD, "PÁR": EVEN},
+}
+_TIP_LINE = re.compile(r"\(\s*([+-]?\d+(?:[.,]\d+)?)\s*\)")
+_SCORE = re.compile(r"(\d+)\s*:\s*(\d+)")
+
+
+def _detail_rows(code: str, bet_name: str, tips: list[Message]) -> list[tuple]:
+    base, period, kind = DETAIL_MARKETS[code]
+    rows = []
+    hcp3_line = None
+    if kind == "hcp3":
+        m = _SCORE.search(bet_name)
+        if m is None:
+            return []
+        hcp3_line = float(int(m.group(1)) - int(m.group(2)))
+    for tip in tips:
+        label = (tip.text(2) or "").strip()
+        f32 = tip.float32(3)
+        price = usable_price(round(f32, 2)) if f32 is not None else None
+        if price is None:
+            continue
+        upper = label.upper()
+        if kind == "ou":  # "Nad (2.5)" / "Pod (2.5)"
+            m = _TIP_LINE.search(label)
+            line = half_line(m.group(1)) if m else None
+            outcome = OVER if upper.startswith("NAD") else UNDER if upper.startswith("POD") else None
+            if line is not None and outcome:
+                rows.append((base, period, line, outcome, price))
+        elif kind == "hcp2":  # "Tím 1 (-1.5)" / "Tím 2 (+1.5)": the line is stored as the home side's
+            m = _TIP_LINE.search(label)
+            value = half_line(m.group(1)) if m else None
+            if value is None or value == 0:
+                continue
+            if upper.startswith("TÍM 1"):
+                rows.append((base, period, value, "1", price))
+            elif upper.startswith("TÍM 2"):
+                rows.append((base, period, -value, "2", price))
+        elif kind == "hcp3":  # "Tím 1" / "Remíza" / "Tím 2" (sometimes followed by "(0:1)")
+            outcome = "1" if upper.startswith("TÍM 1") else "2" if upper.startswith("TÍM 2") else \
+                "X" if upper.startswith(("REMÍZA", "X")) else None
+            if outcome:
+                rows.append((base, period, hcp3_line, outcome, price))
+        else:
+            outcome = _DETAIL_TIPS[kind].get(upper)
+            if outcome:
+                rows.append((base, period, None, outcome, price))
+    return rows
+
+
+def parse_detail_markets(payload: Any, sport: str, fetched_at: datetime, event_id: Any = None) -> list[MarketOdds]:
+    """Markets of one match page (``GetWebStandardEventExt``). Football only (mapping verified there)."""
+    if sport != "football" or not isinstance(payload, dict):
+        return []
+    if payload.get("Result") not in (1, "1"):
+        raise ValueError(f"API Result={payload.get('Result')!r}")
+    root = parse_return_value(str(payload.get("ReturnValue") or ""))
+    rows: list[tuple] = []
+    for em in iter_event_messages(root):
+        if event_id is not None and str(em.int(1)) != str(event_id):
+            continue
+        for group in em.messages(6):
+            for market in group.messages(3):
+                code = (market.text(1) or "").split("d", 1)[0]
+                if code not in DETAIL_MARKETS:
+                    continue
+                for bet in market.messages(6):
+                    rows.extend(_detail_rows(code, bet.text(2) or "", bet.messages(4)))
+        break  # one match per page
+    return group_markets(rows, fetched_at)
+
+
 class TiposProvider(SlovakProvider):
     name = "tipos"
     title = "Tipos"
@@ -154,6 +276,12 @@ class TiposProvider(SlovakProvider):
         body = {"EventID": int(event_id), "LanguageID": LANGUAGE_SK, "Token": secrets.token_hex(16),
                 "UseLongPolling": long_polling}
         return self._client.post_json(self.base_url + DETAIL_PATH, body)
+
+    def fetch_detail(self, event_id: Any, sport: str) -> list[MarketOdds]:
+        try:
+            return parse_detail_markets(self.fetch_detail_raw(event_id), sport, self._clock(), event_id)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ProviderError(f"{self.title}: unexpected match detail format ({type(exc).__name__}: {exc})") from exc
 
     @classmethod
     def parse(cls, payload: Any, sport: str, fetched_at: datetime) -> list[Event]:

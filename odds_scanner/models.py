@@ -31,6 +31,7 @@ class BookmakerOdds:
     last_update: datetime | None = None
     url: str | None = None  # direct link to the match on the bookmaker's site, when known
     event_name: str | None = None  # the bookmaker's own spelling of the match (after merging)
+    event_id: str | None = None  # the provider's own event id (e.g. "doxxbet:80003378") after merging
 
 
 @dataclass(frozen=True)
@@ -102,8 +103,10 @@ class Arbitrage:
     @property
     def push_possible(self) -> bool:
         """Whole-number totals/spreads lines can be refunded ("push"), voiding the guarantee."""
+        from odds_scanner.markets import PUSH_MARKETS
+
         base = self.market.partition("@")[0]
-        return base in ("totals", "spreads") and self.line is not None and float(self.line).is_integer()
+        return base in PUSH_MARKETS and self.line is not None and float(self.line).is_integer()
 
     @property
     def identity(self) -> str:

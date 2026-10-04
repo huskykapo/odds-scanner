@@ -41,7 +41,7 @@ def market_label(arb: Arbitrage) -> str:
 
 def leg_label(arb: Arbitrage, leg: ArbLeg) -> str:
     """Outcome as a reader understands it: ``1 (Košice)`` rather than ``1``."""
-    return outcome_title(leg.outcome, arb.home_team, arb.away_team, arb.line)
+    return outcome_title(leg.outcome, arb.home_team, arb.away_team, arb.line, arb.market)
 
 
 def _rows(arb: Arbitrage) -> list[list[str]]:
