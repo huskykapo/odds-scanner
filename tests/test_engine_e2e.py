@@ -301,3 +301,23 @@ def test_cli_history_reader_adds_stake_rules(tmp_path):
     nike_leg = next(l for l in one["legs"] if l["bookmaker_key"] == "nike")
     assert nike_leg["step"] == 1 and nike_leg["min_stake"] == 2
     assert nike_leg["effective_odds"] == pytest.approx(4.6 * 0.9)  # 10 % stake fee, no win tax
+
+
+def test_dashboard_ignores_browsers_that_disconnect(capsys):
+    import socket
+
+    eng = engine(*mono_nike_sources())
+    eng.run_once()
+    dash = Dashboard(eng.snapshot, "127.0.0.1", 0)
+    dash.start()
+    try:
+        for _ in range(5):  # ask, then hang up without reading the answer
+            s = socket.create_connection(("127.0.0.1", dash.port))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+            s.sendall(b"GET /api/state HTTP/1.1\r\nHost: x\r\n\r\n")
+            s.close()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        assert json.loads(opener.open(f"http://127.0.0.1:{dash.port}/api/state", timeout=5).read())["arbs"]
+    finally:
+        dash.stop()
+    assert "Traceback" not in capsys.readouterr().err

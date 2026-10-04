@@ -17,6 +17,19 @@ from typing import Any, Callable
 log = logging.getLogger(__name__)
 
 PAGE = Path(__file__).with_name("dashboard.html")
+# Raised when the browser goes away while we answer (page reload, closed tab, phone sleeping).
+CLIENT_GONE = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
+
+
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address) -> None:  # type: ignore[override]
+        import sys
+
+        if isinstance(sys.exc_info()[1], CLIENT_GONE):
+            return  # harmless, do not print a traceback
+        super().handle_error(request, client_address)
 NEAR_PAGE = Path(__file__).with_name("near_misses.html")
 
 
@@ -62,7 +75,10 @@ def make_handler(
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except CLIENT_GONE:
+                pass  # the browser closed the tab or reloaded the page mid-answer: nothing to do
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - quiet access log
             log.debug("dashboard %s - %s", self.address_string(), format % args)
@@ -80,7 +96,7 @@ class Dashboard:
         get_near_misses: Callable[[], Any] | None = None,
     ) -> None:
         near_page = NEAR_PAGE.read_bytes() if get_near_misses is not None else None
-        self._server = ThreadingHTTPServer(
+        self._server = _Server(
             (host, port), make_handler(get_state, PAGE.read_bytes(), get_history, get_near_misses, near_page)
         )
         self._server.daemon_threads = True
