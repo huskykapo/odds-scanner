@@ -36,7 +36,7 @@ CACHE_PATH = Path("data") / "discovered_sports.json"
 DISCOVERABLE = ("doxxbet", "tipos", "synot")
 MAX_CANDIDATE = 300
 RETRY_AFTER = timedelta(days=1)
-MAX_CONSECUTIVE_ERRORS = 25
+MAX_CONSECUTIVE_ERRORS = 80  # unused sport numbers may answer with errors; real ones can be far up (football = 54)
 
 # Exact (accent-free, lower-case) sport names as the sites write them. Exact on purpose: "stolný
 # tenis", "pozemný hokej", "hokejbal" or "americký futbal" must not be taken for our sports.
@@ -129,6 +129,39 @@ def probe_tipos(provider: TiposProvider, candidate: int) -> tuple[str | None, se
     return _category_name(root, str(candidate)), ids
 
 
+def quick_doxxbet(provider: DoxxbetProvider) -> dict[str, int]:
+    """Ask DOXXbet for every sport at once (sport = -1, "any", like its other filters).
+
+    Each match carries DOXXbet's own ``SportID`` and Betradar's ``BetradarSportID``, so one or two
+    requests reveal the numbers of all sports. Returns {} if the site does not answer that way.
+    """
+    top = next(iter(provider.request_choice.values()), provider.top_candidates()[0])
+    seen: dict[str, Counter[int]] = {}
+    for date in provider.options.get("dates") or ["TD", "TM"]:
+        try:
+            payload = provider._client.post_json(DOXX_URL, provider.body_for(-1, date, top))  # noqa: SLF001
+        except BlockedError:
+            raise
+        except ProviderError as exc:
+            log.info("DOXXbet: all-sports request (%s) failed: %s", date, exc)
+            continue
+        for ect in (payload.get("EventChanceTypes") or []) if isinstance(payload, dict) else []:
+            if not isinstance(ect, dict):
+                continue
+            sport = BETRADAR_SPORTS.get(str(ect.get("BetradarSportID")))
+            try:
+                sport_id = int(ect.get("SportID"))
+            except (TypeError, ValueError):
+                continue
+            if sport and sport_id > 0:
+                seen.setdefault(sport, Counter())[sport_id] += 1
+    return {sport: ids.most_common(1)[0][0] for sport, ids in seen.items()}
+
+
+# Optional one-shot lookups tried before scanning numbers one by one.
+QUICK: dict[str, Callable[[Any], dict[str, int]]] = {"doxxbet": quick_doxxbet}
+
+
 PROBES: dict[str, Callable[[Any, int], tuple[str | None, set[str]]]] = {
     "doxxbet": probe_doxxbet,
     "tipos": probe_tipos,
@@ -180,7 +213,7 @@ def discover(
 
 # ------------------------------------------------------------------ cache
 class DiscoveryCache:
-    """``{"doxxbet": {"found": {"hockey": 67}, "tried_v3": {"tennis": "<iso time>"}}}`` on disk."""
+    """``{"doxxbet": {"found": {"hockey": 67}, "tried_v4": {"tennis": "<iso time>"}}}`` on disk."""
 
     def __init__(self, path: Path | str = CACHE_PATH) -> None:
         self.path = Path(path)
@@ -196,8 +229,8 @@ class DiscoveryCache:
         return dict((self.data.get(provider) or {}).get("found") or {})
 
     def due(self, provider: str, sport: str, now: datetime) -> bool:
-        # "tried_v3": lookups made before DOXXbet's BetradarSportID was used are retried.
-        tried = ((self.data.get(provider) or {}).get("tried_v3") or {}).get(sport)
+        # "tried_v4": lookups made before the all-sports DOXXbet request existed are retried.
+        tried = ((self.data.get(provider) or {}).get("tried_v4") or {}).get(sport)
         try:
             return tried is None or now - datetime.fromisoformat(tried) > RETRY_AFTER
         except (TypeError, ValueError):
@@ -209,7 +242,7 @@ class DiscoveryCache:
             entry = self.data.setdefault(provider, {})
             entry.setdefault("found", {}).update(found or {})
             for sport in tried:
-                entry.setdefault("tried_v3", {})[sport] = now.isoformat()
+                entry.setdefault("tried_v4", {})[sport] = now.isoformat()
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -174,3 +174,34 @@ def test_doxxbet_sport_found_from_betradar_sport_id_without_any_reference():
 def test_lookups_from_older_versions_are_retried(tmp_path):
     (tmp_path / "d.json").write_text(json.dumps({"doxxbet": {"found": {}, "tried_v2": {"hockey": NOW.isoformat()}}}))
     assert DiscoveryCache(tmp_path / "d.json").due("doxxbet", "hockey", NOW)
+
+
+def test_doxxbet_all_sports_request_finds_every_sport_at_once(tmp_path):
+    from odds_scanner.discovery import quick_doxxbet
+
+    def answer(body):
+        if body["sport"] != -1:
+            return FakeResponse(status=500)  # the one-by-one search must not be needed
+        rows = [(54, 1)] * 3 + [(67, 4)] * 2 + [(63, 2)] + [(70, 5)] + [(99, 20)]  # 20 = table tennis: ignored
+        return {"EventChanceTypes": [{"SportID": sid, "BetradarSportID": br} for sid, br in rows], "Odds": {}}
+
+    site = Site(answer)
+    p = DoxxbetProvider(client=client(site))
+    assert quick_doxxbet(p) == {"football": 54, "hockey": 67, "basketball": 63, "tennis": 70}
+    assert {b["sport"] for b in site.bodies} == {-1}
+
+    # wired into the engine: found without scanning, sports added, saved
+    src = Source("doxxbet", "DOXXbet", p, ["football"], 60, skipped_sports=["hockey", "tennis"])
+    eng = LiveEngine([src], FinderSettings(), clock=lambda: NOW)
+    eng.states["doxxbet"].status = "ok"
+    cache = DiscoveryCache(tmp_path / "d.json")
+    eng.start_discovery(cache).join(10)
+    assert src.sports == ["football", "hockey", "tennis"] and src.note == ""
+    assert cache.found("doxxbet") == {"hockey": 67, "tennis": 70}
+
+
+def test_doxxbet_falls_back_to_scanning_when_all_sports_request_fails():
+    from odds_scanner.discovery import quick_doxxbet
+
+    p = DoxxbetProvider(client=client(Site(lambda body: FakeResponse(status=400))))
+    assert quick_doxxbet(p) == {}

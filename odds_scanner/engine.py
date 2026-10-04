@@ -263,17 +263,27 @@ class LiveEngine:
             w.join()
 
     def _discover_one(self, src: Source, wanted: list[str], reference: dict[str, set[str]], cache: Any) -> None:
-        from odds_scanner.discovery import PROBES, discover
+        from odds_scanner.discovery import PROBES, QUICK, discover
 
         def found_one(sport: str, cid: int) -> None:
             self.add_sport(src, sport, cid)
             cache.record(src.key, found={sport: cid})
 
         try:
-            found = discover(
-                src.provider, PROBES[src.key], wanted, reference,
-                skip=getattr(src.provider, "sport_params", {}).values(), on_found=found_one, stop=self._stop,
-            )
+            found: dict[str, int] = {}
+            quick = QUICK.get(src.key)
+            if quick is not None:
+                for sport, cid in quick(src.provider).items():
+                    if sport in wanted:
+                        log.info("%s: %s has sport id %d (all-sports request)", src.title, sport, cid)
+                        found[sport] = cid
+                        found_one(sport, cid)
+            rest = [w for w in wanted if w not in found]
+            if rest:
+                found.update(discover(
+                    src.provider, PROBES[src.key], rest, reference,
+                    skip=getattr(src.provider, "sport_params", {}).values(), on_found=found_one, stop=self._stop,
+                ))
         except BlockedError:
             src.note = ""
             return  # normal polling reports the block
