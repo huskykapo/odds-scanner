@@ -82,3 +82,22 @@ def test_capture_saves_match_detail_pages(tmp_path):
     assert [b["UseLongPolling"] for b in bodies[:2]] == [False, True]
     assert ("https://www.doxxbet.sk/offer/GetOfferEventDetail", {"eventId": 80003338}) in calls or \
         ("https://www.doxxbet.sk/offer/GetOfferEventDetail", {"eventId": 80003323}) in calls
+
+
+def test_capture_saves_match_pages_of_other_sports_too(tmp_path):
+    from datetime import timedelta
+
+    later = NOW - timedelta(days=1)
+
+    class Pages(Site):
+        def post(self, url, json=None, timeout=None):
+            if url.endswith("GetOfferEventDetail"):
+                return FakeResponse(json_body={"detail": json["eventId"]})
+            return self.answer()
+
+    cl = SiteClient("T", session=Pages(lambda: FakeResponse(json_body=load_sk("doxxbet_football.json"))),
+                    sleep=lambda s: None, throttle=HostThrottle(), max_retries=0)
+    doxx = DoxxbetProvider(client=cl, options={"dates": ["TM"], "top_values": [1], "sport_ids": {"hockey": 4}}, clock=lambda: later)
+    path = capture([Source("doxxbet", "DOXXbet", doxx, ["hockey"], 60)], lambda l: None, tmp_path, later)
+    names = set(zipfile.ZipFile(path).namelist())
+    assert {"doxxbet/hockey_detail_80003338.json", "doxxbet/hockey_detail_80003323.json"} <= names
