@@ -115,3 +115,43 @@ class Arbitrage:
         """Identity of this opportunity: same event/market/line, bookmakers and odds."""
         legs = "|".join(f"{leg.outcome}@{leg.bookmaker_key}:{leg.odds:.3f}" for leg in self.legs)
         return f"{self.event_id}/{self.market}/{self.line}/{legs}"
+
+
+@dataclass(frozen=True)
+class NearMissLeg:
+    """Best price for one outcome of a near miss (no stake: nothing is to be bet)."""
+
+    outcome: str
+    bookmaker_key: str
+    bookmaker_title: str
+    odds: float
+    effective_odds: float | None = None  # after the bookmaker's stake fee / win tax (None = same as odds)
+    odds_updated: datetime | None = None
+    url: str | None = None
+
+
+@dataclass(frozen=True)
+class NearMiss:
+    """The best cross-bookmaker combination for a market that is *not* a profitable arbitrage.
+
+    ``profit_percent`` is what the arbitrage maths would give: negative means that backing every
+    outcome at these prices loses that % of the total stake; between 0 and ``min_profit_percent``
+    it is a real but too-small arbitrage. The closer to 0, the closer the prices are to an arb.
+    """
+
+    event_id: str
+    sport_key: str
+    event_name: str
+    commence_time: datetime
+    market: str
+    line: float | None
+    legs: tuple[NearMissLeg, ...]
+    inverse_sum: float
+    profit_percent: float
+    found_at: datetime
+    home_team: str | None = None
+    away_team: str | None = None
+
+    @property
+    def identity(self) -> str:
+        return f"{self.event_id}/{self.market}/{self.line}"

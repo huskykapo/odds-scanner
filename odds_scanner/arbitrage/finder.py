@@ -48,7 +48,7 @@ from odds_scanner.markets import (
     split_period,
     with_period,
 )
-from odds_scanner.models import ArbLeg, Arbitrage, Event, MarketOdds
+from odds_scanner.models import ArbLeg, Arbitrage, Event, MarketOdds, NearMiss, NearMissLeg
 
 log = logging.getLogger(__name__)
 
@@ -214,28 +214,58 @@ def find_arbitrages(
     events: Iterable[Event], settings: FinderSettings, *, now: datetime | None = None
 ) -> list[Arbitrage]:
     """Return arbitrages across ``events``, best (post-rounding) profit % first."""
+    return analyze_events(events, settings, now=now)[0]
+
+
+def analyze_events(
+    events: Iterable[Event],
+    settings: FinderSettings,
+    *,
+    now: datetime | None = None,
+    near_miss_floor: float | None = None,
+) -> tuple[list[Arbitrage], list[NearMiss]]:
+    """Find arbitrages and, optionally, near misses in one pass over the events.
+
+    A near miss is the best cross-bookmaker combination of a market whose profit % is below
+    ``settings.min_profit_percent`` but not worse than ``-near_miss_floor`` (so it is either a
+    too-small arbitrage or a small guaranteed loss). Both lists are best-first. Near misses
+    obey exactly the same data-quality rules as arbitrages (fresh prices, started events,
+    complete markets, two bookmakers, bad odds), so they are real prices, not noise.
+    """
     now = now or datetime.now(timezone.utc)
     found: list[Arbitrage] = []
+    near: list[NearMiss] = []
     for event in events:
         if event.commence_time <= now:
             log.debug("%s: already started, skipping", event.id)
             continue
         for (market_key, line), books in collect_quotes(event, settings, now).items():
-            arb = _arb_for_group(event, market_key, line, books, settings, now)
+            combo = _best_combo(event, market_key, books)
+            if combo is None:
+                continue
+            arb = _arb_from_combo(event, market_key, line, combo, settings, now)
             if arb is not None:
                 found.append(arb)
+            elif near_miss_floor is not None:
+                miss = _near_miss_from_combo(event, market_key, line, combo, settings, now, near_miss_floor)
+                if miss is not None:
+                    near.append(miss)
     found.sort(key=lambda a: (-a.realized_profit_percent, a.event_name, a.market))
-    return found
+    near.sort(key=lambda m: (-m.profit_percent, m.event_name, m.market))
+    return found, near
 
 
-def _arb_for_group(
-    event: Event,
-    market_key: str,
-    line: float | None,
-    books: dict[str, _Quote],
-    settings: FinderSettings,
-    now: datetime,
-) -> Arbitrage | None:
+@dataclass
+class _Combo:
+    """The best price per outcome of one market group, spanning at least two bookmakers."""
+
+    complete: dict[str, _Quote]  # bookmakers that quote every outcome
+    picks: list[tuple[str, str]]  # (outcome, bookmaker key)
+    odds: list[float]  # effective odds of the picks
+    inv: float  # sum of inverse odds
+
+
+def _best_combo(event: Event, market_key: str, books: dict[str, _Quote]) -> _Combo | None:
     base, _ = split_period(market_key)
     names = sorted({n for q in books.values() for n in q.prices})
     if base in PAIR_MARKETS:
@@ -252,14 +282,48 @@ def _arb_for_group(
     if len(complete) < 2:
         return None
 
-    ordered = _order_outcomes(names, event)
-    picks = _best_legs(ordered, complete)
+    picks = _best_legs(_order_outcomes(names, event), complete)
     if picks is None:
         log.debug("%s/%s: best odds all from one bookmaker, skipping", event.id, market_key)
         return None
-
     odds = [complete[k].effective[name] for name, k in picks]
-    inv = inverse_sum(odds)
+    return _Combo(complete=complete, picks=picks, odds=odds, inv=inverse_sum(odds))
+
+
+def _near_miss_from_combo(
+    event: Event, market_key: str, line: float | None, combo: _Combo,
+    settings: FinderSettings, now: datetime, floor: float,
+) -> NearMiss | None:
+    profit = (1.0 / combo.inv - 1.0) * 100.0
+    # Arbs rejected for other reasons (profit above the sanity cap, or destroyed by stake rounding)
+    # are not "near" anything, so only combinations below the alert threshold qualify.
+    if profit >= settings.min_profit_percent or profit < -floor:
+        return None
+    legs = []
+    for name, key in combo.picks:
+        q = combo.complete[key]
+        quoted, eff = q.prices[name], q.effective[name]
+        legs.append(NearMissLeg(
+            outcome=name, bookmaker_key=key, bookmaker_title=q.title, odds=quoted,
+            effective_odds=None if eff == quoted else eff, odds_updated=q.updated, url=q.url,
+        ))
+    return NearMiss(
+        event_id=event.id, sport_key=event.sport_key, event_name=event.name,
+        commence_time=event.commence_time, market=market_key, line=line, legs=tuple(legs),
+        inverse_sum=combo.inv, profit_percent=profit, found_at=now,
+        home_team=event.home_team, away_team=event.away_team,
+    )
+
+
+def _arb_from_combo(
+    event: Event,
+    market_key: str,
+    line: float | None,
+    combo: _Combo,
+    settings: FinderSettings,
+    now: datetime,
+) -> Arbitrage | None:
+    complete, picks, odds, inv = combo.complete, combo.picks, combo.odds, combo.inv
     if inv >= 1.0 - EPSILON:
         return None
     theoretical = (1.0 / inv - 1.0) * 100.0
@@ -316,4 +380,4 @@ def _arb_for_group(
     )
 
 
-__all__ = ["BookRule", "FinderSettings", "collect_quotes", "find_arbitrages"]
+__all__ = ["BookRule", "FinderSettings", "analyze_events", "collect_quotes", "find_arbitrages"]
