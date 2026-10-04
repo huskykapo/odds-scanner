@@ -1,0 +1,21 @@
+{
+  "_note": "Trimmed from POST /offer/GetOfferList (sport 54 = football, date TM = tomorrow). Captured 2026-10-04. EventDate is Europe/Bratislava local time.",
+  "EventChanceTypes": [
+    {"EventID": 80003338, "EventName": "Cyprus vs. Lotyšsko", "EventDate": "2026-10-05T18:00:00.0000000", "BetType": "TRIO", "EventChanceTypeID": 769610250, "EventChanceTypeStatus": "active", "LiveBetting": "N", "SportID": 54, "LeagueCupID": 595821, "ChanceTypeID": "uf:1", "ChanceTypeName": "Výsledok", "BetradarStatisticsUrn": "sr:match:68932418"},
+    {"EventID": 80003323, "EventName": "Rumunsko vs. Švédsko", "EventDate": "2026-10-05T20:45:00.0000000", "BetType": "TRIO", "EventChanceTypeID": 767756968, "EventChanceTypeStatus": "active", "LiveBetting": "N", "SportID": 54, "LeagueCupID": 595821, "ChanceTypeID": "uf:1", "ChanceTypeName": "Výsledok", "BetradarStatisticsUrn": "sr:match:68932624"}
+  ],
+  "Odds": {
+    "769610250_1": {"EventChanceTypeID": 769610250, "OddsRate": 1.67, "Status": "active", "TipType": "1"},
+    "769610250_X": {"EventChanceTypeID": 769610250, "OddsRate": 3.75, "Status": "active", "TipType": "X"},
+    "769610250_2": {"EventChanceTypeID": 769610250, "OddsRate": 5.5, "Status": "active", "TipType": "2"},
+    "769610250_1X": {"EventChanceTypeID": 769610250, "OddsRate": 1.16, "Status": "active", "TipType": "1X"},
+    "769610250_12": {"EventChanceTypeID": 769610250, "OddsRate": 1.28, "Status": "active", "TipType": "12"},
+    "769610250_X2": {"EventChanceTypeID": 769610250, "OddsRate": 2.23, "Status": "active", "TipType": "X2"},
+    "767756968_1": {"EventChanceTypeID": 767756968, "OddsRate": 4.2, "Status": "active", "TipType": "1"},
+    "767756968_X": {"EventChanceTypeID": 767756968, "OddsRate": 3.95, "Status": "active", "TipType": "X"},
+    "767756968_2": {"EventChanceTypeID": 767756968, "OddsRate": 1.8, "Status": "active", "TipType": "2"},
+    "767756968_1X": {"EventChanceTypeID": 767756968, "OddsRate": 2.04, "Status": "active", "TipType": "1X"},
+    "767756968_12": {"EventChanceTypeID": 767756968, "OddsRate": 1.26, "Status": "active", "TipType": "12"},
+    "767756968_X2": {"EventChanceTypeID": 767756968, "OddsRate": 1.24, "Status": "active", "TipType": "X2"}
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "_note": "Trimmed from GET /api-gw/nikeone/v1/boxes/search/portal?menu=/futbal (prematch). Captured 2026-10-04.",
+  "bets": [
+    {"betId": "934682147", "marketId": "361", "sportEventId": "1014520705", "header": "Zápas", "headerFull": "Zápas", "expirationTime": "2026-10-10T15:30:00+02:00", "game": "Prematch", "bettingState": "RUNNING", "participants": ["FC Košice", "KFC Komárno"], "sportId": "1",
+     "selectionGrid": [[{"type": "selection", "name": "FC Košice", "tip": "49", "odds": 1.69, "enabled": true, "locked": false}, {"type": "selection", "name": "remíza", "tip": "88", "odds": 4.1, "enabled": true, "locked": false}, {"type": "selection", "name": "KFC Komárno", "tip": "50", "odds": 4.3, "enabled": true, "locked": false}],
+                       [{"type": "selection", "name": "1X", "tip": "52", "odds": 1.2, "enabled": true, "locked": false}, {"type": "selection", "name": "12", "tip": "51", "odds": 1.21, "enabled": true, "locked": false}, {"type": "selection", "name": "X2", "tip": "53", "odds": 2.1, "enabled": true, "locked": false}]]},
+    {"betId": "934682150", "marketId": "361", "sportEventId": "1014520706", "header": "Zápas", "headerFull": "Zápas", "expirationTime": "2026-10-11T18:00:00+02:00", "game": "Prematch", "bettingState": "RUNNING", "participants": ["Podbrezová", "Spartak Trnava"], "sportId": "1",
+     "selectionGrid": [[{"type": "selection", "name": "Podbrezová", "tip": "49", "odds": 2.7, "enabled": true, "locked": false}, {"type": "selection", "name": "remíza", "tip": "88", "odds": 3.6, "enabled": true, "locked": false}, {"type": "selection", "name": "Spartak Trnava", "tip": "50", "odds": 2.31, "enabled": true, "locked": false}],
+                       [{"type": "selection", "name": "1X", "tip": "52", "odds": 1.54, "enabled": true, "locked": false}, {"type": "selection", "name": "12", "tip": "51", "odds": 1.24, "enabled": true, "locked": false}, {"type": "selection", "name": "X2", "tip": "53", "odds": 1.41, "enabled": true, "locked": false}]]},
+    {"betId": "933772068", "marketId": "10947", "sportEventId": "1017962732", "header": "Umiestnenie na 1. mieste", "headerFull": "Umiestnenie na 1. mieste: Belgicko", "expirationTime": "2026-10-05T20:45:00+02:00", "game": "Prematch", "bettingState": "RUNNING", "participants": ["Belgicko"], "sportId": "1",
+     "selectionGrid": [[{"type": "label", "name": "Belgicko"}, {"type": "selection", "name": "áno", "tip": "49", "odds": 4.5, "enabled": true, "locked": false}, {"type": "selection", "name": "nie", "tip": "50", "odds": 1.15, "enabled": true, "locked": false}]]}
+  ],
+  "sportEvents": [
+    {"sportEventId": "1014520705", "tournamentId": "30", "sportId": "1", "isLive": false, "participants": ["FC Košice", "KFC Komárno"], "expiration": "2026-10-10T15:30:00+02:00", "sportName": "Futbal", "tournamentName": "Niké liga"},
+    {"sportEventId": "1014520706", "tournamentId": "30", "sportId": "1", "isLive": false, "participants": ["Podbrezová", "Spartak Trnava"], "expiration": "2026-10-11T18:00:00+02:00", "sportName": "Futbal", "tournamentName": "Niké liga"}
+  ],
+  "hasMoreBets": true
+}
