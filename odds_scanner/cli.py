@@ -13,6 +13,7 @@ from typing import Sequence
 from odds_scanner import __version__
 from odds_scanner.arbitrage import BookRule, FinderSettings
 from odds_scanner.config import Config, load_config
+from odds_scanner.discovery import DiscoveryCache
 from odds_scanner.engine import LiveEngine, Source
 from odds_scanner.errors import ConfigError, OddsScannerError
 from odds_scanner.matching import MatchSettings
@@ -103,14 +104,18 @@ def build_sources(cfg: Config) -> list[Source]:
             ))
             continue
         cls = SK_PROVIDERS[name]
+        options = dict(sc.options)
+        found = DiscoveryCache().found(name)  # sport ids looked up automatically on an earlier run
+        if found and not options.get("sample_files"):
+            options[cls.SPORT_OPTION] = {**found, **(options.get(cls.SPORT_OPTION) or {})}  # config wins
         sk = cls(
-            options=sc.options, timeout=sc.timeout_seconds, max_retries=sc.max_retries,
+            options=options, timeout=sc.timeout_seconds, max_retries=sc.max_retries,
             retry_backoff=sc.retry_backoff_seconds, min_interval=sc.min_request_interval_seconds,
         )
         supported = [s for s in sports if sk.supports(s)]
         skipped = [s for s in sports if not sk.supports(s)]
         if skipped:
-            log.info("%s: no site parameter for %s - skipped (see providers.%s.options)", cls.title, ", ".join(skipped), name)
+            log.info("%s: no site id known yet for %s", cls.title, ", ".join(skipped))
         sources.append(Source(name, cls.title, sk, supported, sc.poll_interval_seconds, homepage=cls.homepage, skipped_sports=skipped))
     return sources
 
@@ -186,6 +191,7 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
             except Exception:  # noqa: BLE001 - no browser available is fine
                 pass
     engine.start(analyze_every=min(cfg.dashboard.refresh_seconds, 5.0))
+    engine.start_discovery(DiscoveryCache())
     log.info("polling %s - press Ctrl+C to stop", ", ".join(f"{s.title} ({','.join(s.sports) or '-'})" for s in engine.sources))
     try:
         threading.Event().wait()  # until Ctrl+C

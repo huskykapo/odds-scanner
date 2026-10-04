@@ -143,11 +143,17 @@ User-Agent, never more than one request per second per site, timeouts, retries w
 backoff on network errors / HTTP 5xx / 429, and HTTP 401/403 or a captcha page => **blocked**.
 
 **Sports.** football, hockey, basketball and tennis are configured for MONACObet (sport codes
-S/H/B/T) and Niké (menus `/futbal`, `/hokej`, `/basketbal`, `/tenis`). For DOXXbet, Tipos and
-Synot only the football ids were verified (`sport: 54`, `CategoryID: "28"`); their other sports
-are skipped (shown as "not configured" on the dashboard) until you add the ids. To find one: open
-the site, press F12 -> *Network*, click the sport, and copy the `sport` / `CategoryID` value from the
-`GetOfferList` / `GetWebStandardEvents` request into `config.yaml`:
+S/H/B/T) and Niké (menus `/futbal`, `/hokej`, `/basketbal`, `/tenis`). DOXXbet, Tipos and Synot
+identify sports by numbers of their own, and only football's was known (`sport: 54`,
+`CategoryID: "28"`). **The scanner looks the others up by itself** on the first start: in the
+background it tries the candidate numbers on each of these sites (at the normal pace of at most one
+request per second) and recognises the sport from the category name in the reply (Tipos/Synot) or
+by comparing the matches in the reply with MONACObet's hockey/basketball/tennis matches (Betradar
+ids). This takes a few minutes; the dashboard shows "looking up the site's ids ..." meanwhile, and
+each sport starts being polled as soon as it is found. Results are saved in
+`data/discovered_sports.json` and reused on every start (sports not found are retried the next
+day; delete the file to force a new lookup). You can always set an id yourself, which takes
+precedence:
 
 ```yaml
 providers:

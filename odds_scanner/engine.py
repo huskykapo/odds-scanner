@@ -57,6 +57,7 @@ class Source:
     skipped_sports: list[str] = field(default_factory=list)  # requested but not configured for this site
     fetch_kwargs: dict[str, Any] = field(default_factory=dict)  # regions/markets for The Odds API
     quota_floor: int | None = None  # stop below this many remaining requests (The Odds API)
+    note: str = ""  # shown on the dashboard instead of the "not configured" note (sport id lookup)
 
 
 @dataclass
@@ -158,7 +159,9 @@ class LiveEngine:
         with self._lock:
             state.events = sum(len(self._snapshots.get((source.key, sp), ())) for sp in source.sports)
         notes = list(failed)
-        if source.skipped_sports:
+        if source.note:
+            notes.append(source.note)
+        elif source.skipped_sports:
             notes.append("not configured: " + ", ".join(source.skipped_sports))
         state.message = "; ".join(notes)
         if ok:
@@ -176,6 +179,92 @@ class LiveEngine:
             for sport in source.sports:
                 self._snapshots.pop((source.key, sport), None)
             state.events = 0
+        self._changed.set()
+
+    # ------------------------------------------------------------------ sport id discovery
+    def betradar_reference(self) -> dict[str, set[str]]:
+        """Betradar ids of the events seen so far, per sport (to recognise another site's sport ids)."""
+        from odds_scanner.markets import sport_family
+
+        ref: dict[str, set[str]] = {}
+        with self._lock:
+            for events in self._snapshots.values():
+                for e in events:
+                    if e.betradar_id:
+                        ref.setdefault(sport_family(e.sport_key), set()).add(e.betradar_id)
+        return ref
+
+    def add_sport(self, source: Source, sport: str, param: Any) -> None:
+        """Start polling ``sport`` at ``source`` (found by discovery) from its next cycle on."""
+        source.provider.sport_params[sport] = param  # type: ignore[attr-defined]
+        if sport not in source.sports:
+            source.sports = [*source.sports, sport]
+        source.skipped_sports = [s for s in source.skipped_sports if s != sport]
+        self._changed.set()
+
+    def start_discovery(self, cache: Any) -> threading.Thread | None:
+        """Look up missing sport ids of DOXXbet/Tipos/Synot in the background (see discovery.py)."""
+        from odds_scanner.discovery import DISCOVERABLE
+
+        now = self._clock()
+        todo = {}
+        for s in self.sources:
+            if s.key in DISCOVERABLE and not getattr(s.provider, "samples", None) and s.sports:
+                wanted = [sp for sp in s.skipped_sports if cache.due(s.key, sp, now)]
+                if wanted:
+                    todo[s.key] = (s, wanted)
+                    s.note = f"looking up the site's ids for {', '.join(wanted)} (one-time, a few minutes)"
+                elif s.skipped_sports:
+                    s.note = "not found on this site: " + ", ".join(s.skipped_sports)
+        if not todo:
+            return None
+        t = threading.Thread(target=self._discovery_main, args=(todo, cache), name="discovery", daemon=True)
+        t.start()
+        self._threads.append(t)
+        return t
+
+    def _discovery_main(self, todo: dict[str, tuple[Source, list[str]]], cache: Any) -> None:
+        # Wait for the first round of polls: their Betradar ids are the reference.
+        for _ in range(120):
+            if self._stop.is_set() or all(st.status != "starting" for st in self.states.values()):
+                break
+            self._stop.wait(2)
+        reference = self.betradar_reference()
+        workers = [
+            threading.Thread(target=self._discover_one, args=(src, wanted, reference, cache), name=f"discover-{key}", daemon=True)
+            for key, (src, wanted) in todo.items()
+        ]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+
+    def _discover_one(self, src: Source, wanted: list[str], reference: dict[str, set[str]], cache: Any) -> None:
+        from odds_scanner.discovery import PROBES, discover
+
+        def found_one(sport: str, cid: int) -> None:
+            self.add_sport(src, sport, cid)
+            cache.record(src.key, found={sport: cid})
+
+        try:
+            found = discover(
+                src.provider, PROBES[src.key], wanted, reference,
+                skip=getattr(src.provider, "sport_params", {}).values(), on_found=found_one, stop=self._stop,
+            )
+        except BlockedError:
+            src.note = ""
+            return  # normal polling reports the block
+        except Exception:  # noqa: BLE001 - never take the scanner down
+            log.exception("%s: sport id lookup failed", src.title)
+            src.note = ""
+            return
+        if self._stop.is_set():
+            return
+        missing = [w for w in wanted if w not in found]
+        if missing:
+            cache.record(src.key, tried=missing, now=self._clock())
+            log.info("%s: no sport id found for %s (will retry tomorrow)", src.title, ", ".join(missing))
+        src.note = ("not found on this site: " + ", ".join(missing)) if missing else ""
         self._changed.set()
 
     # ------------------------------------------------------------------ analysis
