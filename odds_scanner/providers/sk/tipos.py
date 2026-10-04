@@ -122,17 +122,30 @@ class TiposProvider(SlovakProvider):
     # Only football ("28") was verified; add the other sports' CategoryID from the site's requests.
     DEFAULT_SPORTS = {"football": "28"}
 
+    # The site's own page asks for Top 50; bigger pages are tried and the best one is kept.
+    DEFAULT_TOP_VALUES = (500, 200, 50)
+
+    def top_candidates(self) -> list[int]:
+        if "top" in self.options:
+            return [int(self.options["top"])]
+        return [int(v) for v in (self.options.get("top_values") or self.DEFAULT_TOP_VALUES)]
+
     def _fetch_payloads(self, sport: str, category_id: Any) -> list[Any]:
+        return self._fetch_best(sport, self.top_candidates(), lambda top: self._fetch_top(category_id, top), "Top")
+
+    def _fetch_top(self, category_id: Any, top: int) -> list[Any]:
         body = {
             "LanguageID": LANGUAGE_SK,
             "Token": secrets.token_hex(16),  # the API wants any 32 hex chars
             "CategoryID": str(category_id),
-            "Top": int(self.options.get("top", 50)),
+            "Top": top,
             "IncludeLiveCategories": False,
         }
         payload = self._client.post_json(self.base_url + PATH, body)
         if not isinstance(payload, dict):
             raise ProviderError(f"{self.title}: unexpected response type {type(payload).__name__}")
+        if payload.get("Result") not in (1, "1"):
+            raise ProviderError(f"{self.title}: the API refused the request (Result={payload.get('Result')!r})")
         return [payload]
 
     @classmethod

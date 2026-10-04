@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from odds_scanner.errors import ProviderError
+from odds_scanner.errors import BlockedError, ProviderError
 from odds_scanner.markets import (
     DC_CODES,
     DOUBLE_CHANCE,
@@ -193,6 +193,52 @@ class SlovakProvider(OddsProvider):
         sports.update({k: v for k, v in (self.options.get(self.SPORT_OPTION) or {}).items()})
         self.sport_params = {k: v for k, v in sports.items() if v not in (None, "")}
         self.samples: dict[str, str] = {str(k): str(v) for k, v in (self.options.get("sample_files") or {}).items()}
+        self.request_choice: dict[str, Any] = {}  # sport -> request setting picked by _fetch_best
+
+    def _fetch_best(self, sport: str, candidates: Sequence[Any], fetch: Callable[[Any], list[Any]], what: str) -> list[Any]:
+        """Use the request setting (e.g. a page size) that returns the most matches.
+
+        The sites' own pages send small values (top 50 / top matches only); bigger ones are not
+        verified, so on the first poll of a sport every candidate is tried once and the one that
+        yields the most events is kept. A candidate the site rejects is simply skipped. If the
+        kept one fails later, the choice is made again on the next poll.
+        """
+        chosen = self.request_choice.get(sport)
+        if chosen is not None or len(candidates) == 1:
+            value = chosen if chosen is not None else candidates[0]
+            try:
+                return fetch(value)
+            except BlockedError:
+                raise
+            except ProviderError:
+                self.request_choice.pop(sport, None)
+                raise
+        best: tuple[Any, int, list[Any]] | None = None
+        last_error: ProviderError | None = None
+        for value in candidates:
+            try:
+                payloads = fetch(value)
+            except BlockedError:
+                raise
+            except ProviderError as exc:
+                log.info("%s %s: %s=%r not accepted (%s)", self.title, sport, what, value, exc)
+                last_error = exc
+                continue
+            count = self._count_events(payloads, sport)
+            log.info("%s %s: %s=%r gives %d event(s)", self.title, sport, what, value, count)
+            if best is None or count > best[1]:
+                best = (value, count, payloads)
+        if best is None:
+            raise last_error or ProviderError(f"{self.title}: no request setting worked")
+        self.request_choice[sport] = best[0]
+        log.info("%s %s: using %s=%r", self.title, sport, what, best[0])
+        return best[2]
+
+    def _count_events(self, payloads: list[Any], sport: str) -> int:
+        try:
+            return sum(len(self._parse(p, sport, self._clock())) for p in payloads)
+        except Exception:  # noqa: BLE001 - an unparseable answer counts as the worst choice
+            return -1
 
     def supports(self, sport: str) -> bool:
         return sport in self.samples if self.samples else sport in self.sport_params

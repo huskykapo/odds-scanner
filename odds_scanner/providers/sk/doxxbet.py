@@ -43,10 +43,26 @@ class DoxxbetProvider(SlovakProvider):
     # Only football (54) was verified; add the others from the site's network requests if needed.
     DEFAULT_SPORTS = {"football": 54}
 
+    # "top": 1 is what the site's own page sends (probably "highlighted matches only"); -1 is
+    # "any" for the other fields, so it likely means all matches. The one giving more is kept.
+    DEFAULT_TOP_VALUES = (-1, 1)
+
+    def top_candidates(self) -> list[Any]:
+        body = self.options.get("body") or {}
+        if "top" in body:
+            return [body["top"]]
+        return list(self.options.get("top_values") or self.DEFAULT_TOP_VALUES)
+
     def _fetch_payloads(self, sport: str, sport_id: Any) -> list[Any]:
+        return self._fetch_best(sport, self.top_candidates(), lambda top: self._fetch_days(sport, sport_id, top), "top")
+
+    def body_for(self, sport_id: Any, date: str, top: Any) -> dict[str, Any]:
+        return {**BASE_BODY, **(self.options.get("body") or {}), "sport": sport_id, "date": date, "top": top}
+
+    def _fetch_days(self, sport: str, sport_id: Any, top: Any) -> list[Any]:
         payloads, failures = [], []
         for date in self.options.get("dates") or ["TD", "TM"]:
-            body = {**BASE_BODY, **(self.options.get("body") or {}), "sport": sport_id, "date": date}
+            body = self.body_for(sport_id, date, top)
             try:
                 payloads.append(self._client.post_json(URL, body))
             except BlockedError:

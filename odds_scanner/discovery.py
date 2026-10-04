@@ -24,7 +24,7 @@ from typing import Any, Callable, Iterable, Mapping
 from odds_scanner.errors import BlockedError, ProviderError
 from odds_scanner.matching import strip_accents
 from odds_scanner.providers.sk.common import betradar_digits
-from odds_scanner.providers.sk.doxxbet import BASE_BODY, URL as DOXX_URL, DoxxbetProvider
+from odds_scanner.providers.sk.doxxbet import URL as DOXX_URL, DoxxbetProvider
 from odds_scanner.providers.sk.protobuf import Message
 from odds_scanner.providers.sk.tipos import LANGUAGE_SK, PATH as TIPOS_PATH, TiposProvider, iter_event_messages, parse_return_value
 
@@ -70,7 +70,8 @@ def classify(ids: Iterable[str], reference: Mapping[str, set[str]]) -> str | Non
 # ------------------------------------------------------------------ one candidate per site
 def probe_doxxbet(provider: DoxxbetProvider, candidate: int) -> tuple[str | None, set[str]]:
     dates = provider.options.get("dates") or ["TM"]
-    body = {**BASE_BODY, **(provider.options.get("body") or {}), "sport": candidate, "date": dates[-1]}
+    top = next(iter(provider.request_choice.values()), provider.top_candidates()[0])  # what polling settled on
+    body = provider.body_for(candidate, dates[-1], top)
     payload = provider._client.post_json(DOXX_URL, body)  # noqa: SLF001 - same polite client as polling
     ects = payload.get("EventChanceTypes") or [] if isinstance(payload, dict) else []
     name = None
@@ -104,7 +105,7 @@ def _category_name(root: Message, candidate: str, depth: int = 0) -> str | None:
 def probe_tipos(provider: TiposProvider, candidate: int) -> tuple[str | None, set[str]]:
     import secrets
 
-    body = {"LanguageID": LANGUAGE_SK, "Token": secrets.token_hex(16), "CategoryID": str(candidate), "Top": 10,
+    body = {"LanguageID": LANGUAGE_SK, "Token": secrets.token_hex(16), "CategoryID": str(candidate), "Top": 20,
             "IncludeLiveCategories": False}
     payload = provider._client.post_json(provider.base_url + TIPOS_PATH, body)  # noqa: SLF001
     if not isinstance(payload, dict) or payload.get("Result") not in (1, "1") or not payload.get("ReturnValue"):
@@ -165,7 +166,7 @@ def discover(
 
 # ------------------------------------------------------------------ cache
 class DiscoveryCache:
-    """``{"doxxbet": {"found": {"hockey": 67}, "tried": {"tennis": "<iso time>"}}}`` on disk."""
+    """``{"doxxbet": {"found": {"hockey": 67}, "tried_v2": {"tennis": "<iso time>"}}}`` on disk."""
 
     def __init__(self, path: Path | str = CACHE_PATH) -> None:
         self.path = Path(path)
@@ -181,7 +182,8 @@ class DiscoveryCache:
         return dict((self.data.get(provider) or {}).get("found") or {})
 
     def due(self, provider: str, sport: str, now: datetime) -> bool:
-        tried = ((self.data.get(provider) or {}).get("tried") or {}).get(sport)
+        # "tried_v2": lookups made before DOXXbet asked for all matches (top=-1) are retried.
+        tried = ((self.data.get(provider) or {}).get("tried_v2") or {}).get(sport)
         try:
             return tried is None or now - datetime.fromisoformat(tried) > RETRY_AFTER
         except (TypeError, ValueError):
@@ -193,7 +195,7 @@ class DiscoveryCache:
             entry = self.data.setdefault(provider, {})
             entry.setdefault("found", {}).update(found or {})
             for sport in tried:
-                entry.setdefault("tried", {})[sport] = now.isoformat()
+                entry.setdefault("tried_v2", {})[sport] = now.isoformat()
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")

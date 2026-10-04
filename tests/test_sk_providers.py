@@ -169,7 +169,7 @@ def test_protobuf_reader_basics():
 
 def test_tipos_request_body(monkeypatch):
     session = FakeSession(FakeResponse(json_body=load_sk("synot_football_standard_events.json")))
-    events = TiposProvider(client=client(session)).fetch_odds("football").events
+    events = TiposProvider(client=client(session), options={"top": 50}).fetch_odds("football").events
     url, body = session.calls[0]
     assert url == "https://tipkurz.etipos.sk/WebServices/Api/SportsBettingService.svc/GetWebStandardEvents"
     assert body["CategoryID"] == "28" and body["LanguageID"] == 17 and body["IncludeLiveCategories"] is False
