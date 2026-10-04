@@ -99,7 +99,7 @@ function h(tag, attrs, ...kids) {
 }
 const safeUrl = (u) => (typeof u === "string" && /^https?:\/\//i.test(u)) ? u : null;
 const money = (v) => (Math.round(v * 100) / 100).toFixed(2);
-const stakeText = (v) => Number.isInteger(v) ? String(v) : v.toFixed(2);
+const stakeText = (v) => v.toFixed(2);
 function roundTo(v, step) { return Number((Math.round(v / step + 1e-9) * step).toFixed(2)); }
 function ceilTo(v, step) { return Number((Math.ceil(v / step - 1e-9) * step).toFixed(2)); }
 
