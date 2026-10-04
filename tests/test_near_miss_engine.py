@@ -112,3 +112,24 @@ def test_near_miss_config_default_validation_and_cli_wiring():
             config_from_dict({"near_miss_percent": bad})
     assert cli.build_engine(cfg)._near_floor == 3.0
     assert cli.build_engine(config_from_dict({"near_miss_percent": 0}))._near_floor is None
+
+
+# ------------------------------------------------------------------ Ctrl+C must stop the scanner (Windows)
+def test_run_live_waits_with_a_timeout_so_ctrl_c_works_on_windows(monkeypatch):
+    """A bare Event().wait() cannot be interrupted by Ctrl+C on Windows; every wait needs a timeout."""
+    timeouts = []
+
+    class InterruptingEvent:
+        def wait(self, timeout=None):
+            timeouts.append(timeout)
+            if len(timeouts) == 3:
+                raise KeyboardInterrupt
+            return False
+
+    eng = make_engine()  # built first: it needs real threading.Events
+    monkeypatch.setattr(eng, "start", lambda **kw: None)
+    monkeypatch.setattr(eng, "start_discovery", lambda cache: None)
+    monkeypatch.setattr(cli, "DiscoveryCache", lambda: None)
+    monkeypatch.setattr(cli.threading, "Event", InterruptingEvent)
+    assert cli.run_live(config_from_dict({}), eng, once=False, dashboard=False) == 0
+    assert timeouts == [0.5, 0.5, 0.5]  # never an untimed wait

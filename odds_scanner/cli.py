@@ -220,7 +220,10 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
     engine.start_discovery(DiscoveryCache())
     log.info("polling %s - press Ctrl+C to stop", ", ".join(f"{s.title} ({','.join(s.sports) or '-'})" for s in engine.sources))
     try:
-        threading.Event().wait()  # until Ctrl+C
+        # Short waits in a loop: on Windows a single wait() with no timeout cannot be interrupted by Ctrl+C.
+        forever = threading.Event()
+        while not forever.wait(0.5):
+            pass
     except KeyboardInterrupt:
         log.info("stopping")
     finally:
