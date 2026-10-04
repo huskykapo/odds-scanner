@@ -85,6 +85,7 @@ dashboard:
   port: 8765
   refresh_seconds: 3
   highlight_seconds: 120
+  open_browser: true   # open the dashboard in your browser when the scanner starts
 
 # ---- notifications -----------------------------------------------------------------------
 notifications:

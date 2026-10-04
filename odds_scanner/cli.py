@@ -178,6 +178,13 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
         dash.start()
         ip = lan_ip()
         print(f"Dashboard: http://localhost:{dash.port}" + (f"   (phone on the same Wi-Fi: http://{ip}:{dash.port})" if ip else ""), flush=True)
+        if cfg.dashboard.open_browser:
+            import webbrowser
+
+            try:
+                webbrowser.open(f"http://localhost:{dash.port}")
+            except Exception:  # noqa: BLE001 - no browser available is fine
+                pass
     engine.start(analyze_every=min(cfg.dashboard.refresh_seconds, 5.0))
     log.info("polling %s - press Ctrl+C to stop", ", ".join(f"{s.title} ({','.join(s.sports) or '-'})" for s in engine.sources))
     try:

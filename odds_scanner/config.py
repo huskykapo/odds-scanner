@@ -142,6 +142,7 @@ class DashboardConfig:
     port: int = 8765
     refresh_seconds: float = 3.0
     highlight_seconds: float = 120.0  # arbs first seen this recently are highlighted
+    open_browser: bool = True  # open the dashboard in the default browser at start-up
 
     def __post_init__(self) -> None:
         if not isinstance(self.port, int) or isinstance(self.port, bool) or not 0 < self.port < 65536:

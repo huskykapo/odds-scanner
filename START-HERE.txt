@@ -1,0 +1,28 @@
+ARB SCANNER - QUICK START (Windows)
+===================================
+
+1. Install Python 3.11 or newer (one time):
+   https://www.python.org/downloads/
+   IMPORTANT: in the installer tick "Add python.exe to PATH".
+
+2. Double-click start.bat
+   - The first start takes a minute: it installs what it needs into the .venv folder.
+   - Then the dashboard opens in your browser: http://localhost:8765
+   - Keep the black window open while you use it. Close it to stop the scanner.
+   - If Windows Firewall asks, allow Python on PRIVATE networks (needed for the phone).
+
+3. Phone: the black window prints a line like
+       (phone on the same Wi-Fi: http://192.168.1.23:8765)
+   Open that address on a phone connected to the same Wi-Fi.
+
+4. Check the bookmaker sites answer from your PC (recommended once):
+   open a command prompt in this folder and run:   start.bat probe
+   Each bookmaker shows OK, BLOCKED or ERROR.
+
+Settings (bankroll, minimum profit, which bookmakers, Telegram alerts...) are in
+config.yaml - open it with Notepad. Every arb found is saved in the data folder
+(arbs.csv opens in Excel).
+
+ALWAYS check every price on the bookmaker's own site before betting: odds move
+fast and bookmakers limit accounts that bet arbs. This tool only shows
+opportunities - it never places bets. Full manual: README.md

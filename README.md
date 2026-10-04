@@ -35,7 +35,8 @@ terminal and optionally on Telegram.
 2. Download this repository (green "Code" button -> *Download ZIP*, then unzip) or `git clone` it.
 3. Double-click **`start.bat`**. The first run creates a virtual environment in `.venv` and installs
    the two dependencies (`requests`, `PyYAML`); later runs start immediately.
-4. Open **<http://localhost:8765>** in your browser.
+4. The dashboard opens in your browser by itself (**<http://localhost:8765>**). Keep the black
+   window open while you use it; close it (or press Ctrl+C) to stop the scanner.
 
 To first check that the bookmaker sites answer from your PC, open a terminal (`cmd`) in the folder and
 run:
