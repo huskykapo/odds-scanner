@@ -28,6 +28,7 @@ from odds_scanner.providers.sk.common import (
 log = logging.getLogger(__name__)
 
 URL = "https://www.doxxbet.sk/offer/GetOfferList"
+DETAIL_URL = "https://www.doxxbet.sk/offer/GetOfferEventDetail"  # one match's full bet list
 BASE_BODY = {"sportEvent": -1, "sport": 54, "region": -1, "leaugeCup": -1, "live": -1, "date": "TM", "top": 1, "streamOnly": -1}
 
 RESULT_MARKETS = {"uf:1", "uf:10", "uf:186"}
@@ -55,6 +56,10 @@ class DoxxbetProvider(SlovakProvider):
 
     def _fetch_payloads(self, sport: str, sport_id: Any) -> list[Any]:
         return self._fetch_best(sport, self.top_candidates(), lambda top: self._fetch_days(sport, sport_id, top), "top")
+
+    def fetch_detail_raw(self, event_id: Any) -> Any:
+        """The match page's full bet list (over/under, handicaps, ...), as the site sends it."""
+        return self._client.post_json(DETAIL_URL, {"eventId": int(event_id)})
 
     def body_for(self, sport_id: Any, date: str, top: Any) -> dict[str, Any]:
         return {**BASE_BODY, **(self.options.get("body") or {}), "sport": sport_id, "date": date, "top": top}

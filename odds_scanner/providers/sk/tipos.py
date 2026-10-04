@@ -29,6 +29,7 @@ from odds_scanner.providers.sk.protobuf import Message
 log = logging.getLogger(__name__)
 
 PATH = "/WebServices/Api/SportsBettingService.svc/GetWebStandardEvents"
+DETAIL_PATH = "/WebServices/Api/SportsBettingService.svc/GetWebStandardEventExt"  # one match's full bet list
 LANGUAGE_SK = 17
 
 MATCH_MARKET = "zápas"
@@ -147,6 +148,12 @@ class TiposProvider(SlovakProvider):
         if payload.get("Result") not in (1, "1"):
             raise ProviderError(f"{self.title}: the API refused the request (Result={payload.get('Result')!r})")
         return [payload]
+
+    def fetch_detail_raw(self, event_id: Any, long_polling: bool = False) -> Any:
+        """The match page's full bet list, as the site sends it (base64 protobuf in ReturnValue)."""
+        body = {"EventID": int(event_id), "LanguageID": LANGUAGE_SK, "Token": secrets.token_hex(16),
+                "UseLongPolling": long_polling}
+        return self._client.post_json(self.base_url + DETAIL_PATH, body)
 
     @classmethod
     def parse(cls, payload: Any, sport: str, fetched_at: datetime) -> list[Event]:
