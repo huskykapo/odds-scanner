@@ -5,19 +5,28 @@ ARB SCANNER - QUICK START (Windows)
    https://www.python.org/downloads/
    IMPORTANT: in the installer tick "Add python.exe to PATH".
 
-2. Double-click start.bat
-   - The first start takes a minute: it installs what it needs into the .venv folder.
+2. Double-click  start.py
+   (Use start.py, not start.bat: Windows "Smart App Control" blocks downloaded
+   .bat files, but start.py runs through Python itself, which is allowed.)
+   - The first start takes a minute: it downloads the libraries it needs into
+     the "lib" folder.
    - Then the dashboard opens in your browser: http://localhost:8765
    - Keep the black window open while you use it. Close it to stop the scanner.
    - If Windows Firewall asks, allow Python on PRIVATE networks (needed for the phone).
+
+   If double-clicking start.py opens a text editor instead: click in the folder's
+   address bar, type  cmd  and press Enter, then type:   py start.py
 
 3. Phone: the black window prints a line like
        (phone on the same Wi-Fi: http://192.168.1.23:8765)
    Open that address on a phone connected to the same Wi-Fi.
 
 4. Check the bookmaker sites answer from your PC (recommended once):
-   open a command prompt in this folder and run:   start.bat probe
+   in that cmd window type:   py start.py probe
    Each bookmaker shows OK, BLOCKED or ERROR.
+
+Do NOT turn Smart App Control off for this - it is not needed, and Windows
+cannot turn it back on without a reinstall.
 
 Settings (bankroll, minimum profit, which bookmakers, Telegram alerts...) are in
 config.yaml - open it with Notepad. Every arb found is saved in the data folder

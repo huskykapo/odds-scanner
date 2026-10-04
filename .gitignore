@@ -11,3 +11,4 @@ data/
 *.db
 # never commit secrets
 .env
+lib/

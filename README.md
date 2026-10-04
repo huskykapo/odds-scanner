@@ -33,8 +33,14 @@ terminal and optionally on Telegram.
 1. Install **Python 3.11 or newer** from <https://www.python.org/downloads/> and tick
    **"Add python.exe to PATH"** in the installer.
 2. Download this repository (green "Code" button -> *Download ZIP*, then unzip) or `git clone` it.
-3. Double-click **`start.bat`**. The first run creates a virtual environment in `.venv` and installs
-   the two dependencies (`requests`, `PyYAML`); later runs start immediately.
+3. Double-click **`start.py`**. The first run downloads the few pure-Python libraries it needs
+   (`requests`, `PyYAML`, ...) into the `lib` folder; later runs start immediately.
+   *Windows Smart App Control blocks downloaded `.bat` files, which is why `start.py` is the
+   recommended launcher: it runs through Python itself (signed, allowed) and installs no compiled
+   add-ons. Do not turn Smart App Control off - it cannot be turned back on without reinstalling
+   Windows.* If double-clicking opens an editor, type `cmd` in the folder's address bar and run
+   `py start.py`. (`start.bat`, which uses a virtual environment, still works where `.bat` files are
+   allowed.)
 4. The dashboard opens in your browser by itself (**<http://localhost:8765>**). Keep the black
    window open while you use it; close it (or press Ctrl+C) to stop the scanner.
 
@@ -42,7 +48,7 @@ To first check that the bookmaker sites answer from your PC, open a terminal (`c
 run:
 
 ```bat
-start.bat probe
+py start.py probe
 ```
 
 When Windows asks whether Python may use the network, allow **private networks** - that is what lets
@@ -82,7 +88,7 @@ python -m odds_scanner --help          # options: -c CONFIG, --bankroll, --min-p
                                        #          --no-dashboard, --log-level DEBUG, ...
 ```
 
-`start.bat` / `start.sh` pass their arguments through (`start.bat probe`).
+`start.py`, `start.bat` and `start.sh` pass their arguments through (`py start.py probe`).
 
 Example `probe` output:
 
