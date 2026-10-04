@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odds-scanner"
+version = "0.1.0"
+description = "Sports-betting arbitrage (surebet) scanner. Alerts only - never places bets."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+odds-scanner = "odds_scanner.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["odds_scanner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
