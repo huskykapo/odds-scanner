@@ -84,6 +84,7 @@ python -m odds_scanner                 # scan continuously + dashboard on http:/
 python -m odds_scanner --once          # poll every provider once, print the arbs, exit
 python -m odds_scanner probe           # check each live endpoint once: OK / BLOCKED / ERROR + event counts
 python -m odds_scanner probe-fortuna   # one plain request to ifortuna.sk: does the page contain match data?
+python -m odds_scanner telegram-test   # guided Telegram setup: bot token -> chat id -> test message
 python -m odds_scanner --help          # options: -c CONFIG, --bankroll, --min-profit, --port,
                                        #          --no-dashboard, --log-level DEBUG, ...
 ```
@@ -113,6 +114,14 @@ stakes are recalculated in the browser with the same rounding rules (remembered 
 by sport. Below: **provider status** (ok / error / blocked, events, last update, notes) and
 **matching quality** (how many matches are quoted by 2+ bookmakers, joined by Betradar id or by name,
 unmatched events per bookmaker).
+
+**Near misses** (`http://localhost:8765/near-misses`, linked from the dashboard header): the closest
+combinations of the best prices from different bookmakers that are **not** arbitrages yet - either
+real arbs below `min_profit_percent`, or small guaranteed losses down to `near_miss_percent` (default
+3 %). Each shows the gap (e.g. `-1.84 %` = backing everything would lose 1.84 % of the stake;
+`0 %` = break-even), the bets, odds, bookmakers and the age of each price. They obey the same data
+rules as arbs (fresh prices, complete markets, two bookmakers, not started), so it is a live view of
+how close the market is. They are **not** bets to place. Set `near_miss_percent: 0` to switch it off.
 
 **Terminal**: every *new* arb is printed as a table. **Telegram** (optional): one message per new
 arb above the threshold, with stakes. **Log**: every new arb is appended to `data/arbs.csv` and
@@ -253,6 +262,7 @@ The most useful settings:
 | `matching.time_tolerance_minutes` / `name_threshold` / `aliases` | `15` / `0.8` / `{}` | Event matching |
 | `dashboard.host` / `port` / `refresh_seconds` | `0.0.0.0` / `8765` / `3` | Web dashboard |
 | `notifications.console` | `true` | Print new arbs |
+| `near_miss_percent` | `3` | `/near-misses` list: show non-arbs down to this % loss (`0` = off) |
 | `notifications.telegram.*` | disabled | `enabled`, `token_env`, `chat_id_env`, `min_profit_percent` |
 | `notifications.dedupe_ttl_minutes` | `60` | Don't re-alert / re-log the same arb within this window |
 | `storage.backend` | `both` in `config.yaml` | `csv`, `sqlite`, `both`, `none` |
@@ -263,19 +273,26 @@ are polled).
 
 ### Telegram alerts
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
-2. Send your bot a message, then open `https://api.telegram.org/bot<token>/getUpdates` and read `chat.id`.
-3. Set both as environment variables (never put them in a committed file) and set
-   `notifications.telegram.enabled: true`:
+The easy way: run `py start.py telegram-test` (or `python -m odds_scanner telegram-test`) and follow
+what it prints - it tells you the next missing step each time you run it:
 
-```bat
+1. **No token yet** - it explains how to create a bot with [@BotFather](https://t.me/BotFather).
+   Set the token in PowerShell: `$env:TELEGRAM_BOT_TOKEN = "123456:ABC..."` and run it again.
+2. **Token, no chat id** - it lists the chats that have written to your bot (press *Start* in your
+   bot first) and prints the command to set `TELEGRAM_CHAT_ID`.
+3. **Both set** - it sends a test message to your chat. Then set
+   `notifications.telegram.enabled: true` in `config.yaml` and restart the scanner.
+
+`$env:...` only lasts for that PowerShell window. To keep the values for future windows run `setx`
+once and open a new window (never put the token in a file that is committed):
+
+```powershell
 setx TELEGRAM_BOT_TOKEN "123456:ABC..."
 setx TELEGRAM_CHAT_ID "123456789"
 ```
 
-(`setx` applies to new terminals; on Linux/macOS use `export`.) Each arb is sent once (same match,
-market, bookmakers and odds) within `dedupe_ttl_minutes`; failed sends are retried, never crash the
-scanner and never log the token.
+On Linux/macOS use `export`. Each arb is sent once (same match, market, bookmakers and odds) within
+`dedupe_ttl_minutes`; failed sends are retried, never crash the scanner and never log the token.
 
 ### The Odds API (optional, off by default)
 

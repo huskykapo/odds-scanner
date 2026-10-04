@@ -235,9 +235,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         prog="odds-scanner",
         description="Scan bookmaker odds for arbitrage (surebet) opportunities. Alerts only - never places bets.",
         epilog="commands: run (default) - scan and serve the dashboard; probe - check each bookmaker endpoint once; "
-        "probe-fortuna - check whether Fortuna's football page contains match data.",
+        "probe-fortuna - check whether Fortuna's football page contains match data; "
+        "telegram-test - guided Telegram alert setup and test message.",
     )
-    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna"))
+    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test"))
     ap.add_argument("-c", "--config", default="config.yaml", help="path to config file (default: %(default)s)")
     ap.add_argument("--once", action="store_true", help="scan once and exit instead of polling forever")
     ap.add_argument("--no-dashboard", action="store_true", help="do not start the web dashboard")
@@ -280,6 +281,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             from odds_scanner.probe import probe
 
             return probe(cfg)
+        if args.command == "telegram-test":
+            from odds_scanner.notifiers.telegram_setup import check_telegram
+
+            return check_telegram(cfg)
         if not args.replay:
             return run_live(cfg, build_engine(cfg), once=args.once, dashboard=not args.no_dashboard)
         # Legacy single-provider mode: replay a file in The Odds API format.

@@ -92,7 +92,7 @@ dashboard:
 notifications:
   console: true                     # print each new arb in the terminal
   telegram:
-    enabled: false
+    enabled: false                  # set up first with:  py start.py telegram-test
     token_env: TELEGRAM_BOT_TOKEN   # name of the env var holding the bot token
     chat_id_env: TELEGRAM_CHAT_ID   # name of the env var holding the chat id
     min_profit_percent: null        # alert threshold; null = min_profit_percent
