@@ -1,0 +1,703 @@
+[
+  {
+    "id": "evt_football_arb",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-10-05T15:00:00Z",
+    "home_team": "Northgate FC",
+    "away_team": "Riverside United",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Northgate FC",
+                "price": 2.5
+              },
+              {
+                "name": "Draw",
+                "price": 3.3
+              },
+              {
+                "name": "Riverside United",
+                "price": 2.9
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Northgate FC",
+                "price": 2.3
+              },
+              {
+                "name": "Draw",
+                "price": 3.6
+              },
+              {
+                "name": "Riverside United",
+                "price": 3.0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "gammaodds",
+        "title": "Gamma Odds",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Northgate FC",
+                "price": 2.2
+              },
+              {
+                "name": "Draw",
+                "price": 3.2
+              },
+              {
+                "name": "Riverside United",
+                "price": 3.4
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_football_noarb",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-10-05T17:30:00Z",
+    "home_team": "Eastport Town",
+    "away_team": "Westfield Athletic",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Eastport Town",
+                "price": 1.8
+              },
+              {
+                "name": "Draw",
+                "price": 3.8
+              },
+              {
+                "name": "Westfield Athletic",
+                "price": 4.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Eastport Town",
+                "price": 1.85
+              },
+              {
+                "name": "Draw",
+                "price": 3.6
+              },
+              {
+                "name": "Westfield Athletic",
+                "price": 4.4
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "gammaodds",
+        "title": "Gamma Odds",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Eastport Town",
+                "price": 1.75
+              },
+              {
+                "name": "Draw",
+                "price": 3.9
+              },
+              {
+                "name": "Westfield Athletic",
+                "price": 4.6
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_football_missing_draw",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-10-06T19:00:00Z",
+    "home_team": "Harbor City",
+    "away_team": "Hillcrest Rovers",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Harbor City",
+                "price": 2.0
+              },
+              {
+                "name": "Draw",
+                "price": 3.5
+              },
+              {
+                "name": "Hillcrest Rovers",
+                "price": 4.0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Harbor City",
+                "price": 2.6
+              },
+              {
+                "name": "Hillcrest Rovers",
+                "price": 3.0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "gammaodds",
+        "title": "Gamma Odds",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Harbor City",
+                "price": 1.95
+              },
+              {
+                "name": "Draw",
+                "price": 3.4
+              },
+              {
+                "name": "Hillcrest Rovers",
+                "price": 4.1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_football_stale",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-10-06T14:00:00Z",
+    "home_team": "Lakeside Wanderers",
+    "away_team": "Moorland Albion",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Lakeside Wanderers",
+                "price": 2.6
+              },
+              {
+                "name": "Draw",
+                "price": 3.0
+              },
+              {
+                "name": "Moorland Albion",
+                "price": 3.0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:30:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:30:00Z",
+            "outcomes": [
+              {
+                "name": "Lakeside Wanderers",
+                "price": 2.2
+              },
+              {
+                "name": "Draw",
+                "price": 3.9
+              },
+              {
+                "name": "Moorland Albion",
+                "price": 3.2
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "gammaodds",
+        "title": "Gamma Odds",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Lakeside Wanderers",
+                "price": 2.3
+              },
+              {
+                "name": "Draw",
+                "price": 3.1
+              },
+              {
+                "name": "Moorland Albion",
+                "price": 3.1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_football_started",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-10-04T11:00:00Z",
+    "home_team": "Oakdale FC",
+    "away_team": "Pinewood Rangers",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Oakdale FC",
+                "price": 2.6
+              },
+              {
+                "name": "Draw",
+                "price": 3.2
+              },
+              {
+                "name": "Pinewood Rangers",
+                "price": 2.9
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Oakdale FC",
+                "price": 2.3
+              },
+              {
+                "name": "Draw",
+                "price": 3.9
+              },
+              {
+                "name": "Pinewood Rangers",
+                "price": 3.4
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_tennis_arb",
+    "sport_key": "tennis_atp_paris_masters",
+    "sport_title": "ATP Paris Masters",
+    "commence_time": "2026-10-05T13:00:00Z",
+    "home_team": "Jan Kovac",
+    "away_team": "Luca Moretti",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Jan Kovac",
+                "price": 2.1
+              },
+              {
+                "name": "Luca Moretti",
+                "price": 1.75
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Jan Kovac",
+                "price": 1.9
+              },
+              {
+                "name": "Luca Moretti",
+                "price": 2.05
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "gammaodds",
+        "title": "Gamma Odds",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Jan Kovac",
+                "price": 2.0
+              },
+              {
+                "name": "Luca Moretti",
+                "price": 1.95
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_tennis_same_book",
+    "sport_key": "tennis_atp_paris_masters",
+    "sport_title": "ATP Paris Masters",
+    "commence_time": "2026-10-05T14:30:00Z",
+    "home_team": "Mia Berg",
+    "away_team": "Nora Lund",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Mia Berg",
+                "price": 2.2
+              },
+              {
+                "name": "Nora Lund",
+                "price": 2.1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Mia Berg",
+                "price": 1.8
+              },
+              {
+                "name": "Nora Lund",
+                "price": 2.0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_nba_totals",
+    "sport_key": "basketball_nba",
+    "sport_title": "NBA",
+    "commence_time": "2026-10-05T01:00:00Z",
+    "home_team": "Metro Hawks",
+    "away_team": "Bay Wolves",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Metro Hawks",
+                "price": 1.5
+              },
+              {
+                "name": "Bay Wolves",
+                "price": 2.7
+              }
+            ]
+          },
+          {
+            "key": "totals",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "price": 2.0,
+                "point": 220.5
+              },
+              {
+                "name": "Under",
+                "price": 1.8,
+                "point": 220.5
+              },
+              {
+                "name": "Over",
+                "price": 2.3,
+                "point": 224.5
+              },
+              {
+                "name": "Under",
+                "price": 1.62,
+                "point": 224.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Metro Hawks",
+                "price": 1.55
+              },
+              {
+                "name": "Bay Wolves",
+                "price": 2.55
+              }
+            ]
+          },
+          {
+            "key": "totals",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "price": 1.9,
+                "point": 220.5
+              },
+              {
+                "name": "Under",
+                "price": 2.1,
+                "point": 220.5
+              },
+              {
+                "name": "Over",
+                "price": 2.2,
+                "point": 224.5
+              },
+              {
+                "name": "Under",
+                "price": 1.65,
+                "point": 224.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "evt_nba_spreads",
+    "sport_key": "basketball_nba",
+    "sport_title": "NBA",
+    "commence_time": "2026-10-05T03:30:00Z",
+    "home_team": "Capital Bears",
+    "away_team": "Delta Kings",
+    "bookmakers": [
+      {
+        "key": "alphabet",
+        "title": "AlphaBet",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "spreads",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Capital Bears",
+                "price": 2.05,
+                "point": -5.5
+              },
+              {
+                "name": "Delta Kings",
+                "price": 1.8,
+                "point": 5.5
+              },
+              {
+                "name": "Capital Bears",
+                "price": 2.3,
+                "point": -6.5
+              },
+              {
+                "name": "Delta Kings",
+                "price": 1.62,
+                "point": 6.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betaplay",
+        "title": "BetaPlay",
+        "last_update": "2026-10-04T11:59:30Z",
+        "markets": [
+          {
+            "key": "spreads",
+            "last_update": "2026-10-04T11:59:30Z",
+            "outcomes": [
+              {
+                "name": "Capital Bears",
+                "price": 1.85,
+                "point": -5.5
+              },
+              {
+                "name": "Delta Kings",
+                "price": 2.1,
+                "point": 5.5
+              },
+              {
+                "name": "Capital Bears",
+                "price": 2.2,
+                "point": -6.5
+              },
+              {
+                "name": "Delta Kings",
+                "price": 1.65,
+                "point": 6.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
