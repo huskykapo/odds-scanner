@@ -230,4 +230,5 @@ def _canonical_book(book: BookmakerOdds, member: Event, canonical: Event) -> Boo
         last_update=book.last_update,
         url=book.url,
         event_name=book.event_name or member.name,
+        event_id=book.event_id or member.id,
     )

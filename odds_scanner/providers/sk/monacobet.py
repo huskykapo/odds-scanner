@@ -15,16 +15,51 @@ import logging
 from datetime import datetime
 from typing import Any, Iterator
 
-from odds_scanner.markets import OVER, UNDER, usable_price
+from odds_scanner.markets import (
+    BTTS,
+    FIRST_HALF,
+    H2H_3_WAY,
+    NO,
+    OVER,
+    TEAM_TOTALS_AWAY,
+    TEAM_TOTALS_HOME,
+    TOTALS,
+    UNDER,
+    YES,
+    usable_price,
+)
 from odds_scanner.models import Event
-from odds_scanner.providers.sk.common import SlovakProvider, betradar_digits, epoch_ms_to_utc, make_event
+from odds_scanner.providers.sk.common import (
+    SlovakProvider,
+    betradar_digits,
+    epoch_ms_to_utc,
+    group_markets,
+    half_line,
+    make_event,
+)
 
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://ibet-monaco.dualsoft.bet/restapi/offer/sk"
 QUERY = {"annex": "4", "mobileVersion": "2.3.22", "locale": "sk"}
+DETAIL_QUERY = {"annex": "4", "desktopVersion": "2.3.22", "locale": "sk"}
+NAMES_URL = f"{BASE_URL}/ttg_lang"  # names of every tip type (bet) code
 
 DEFAULT_TIP_TYPES = {"1": "1", "2": "X", "3": "2", "227": OVER, "228": UNDER}
+
+# Football-only extra markets in the list feed: tip type -> (market, period, outcome). Each one was
+# checked against DOXXbet's odds for the same Betradar matches (captured 2026-10-04). Note that in
+# the team-goal markets the LOWER number is "under", unlike 227/228.
+FOOTBALL_EXTRA_TIPS = {
+    "4": (H2H_3_WAY, FIRST_HALF, "1"), "5": (H2H_3_WAY, FIRST_HALF, "X"), "6": (H2H_3_WAY, FIRST_HALF, "2"),
+    "229": (TOTALS, FIRST_HALF, OVER), "230": (TOTALS, FIRST_HALF, UNDER),
+    "272": (BTTS, None, YES), "273": (BTTS, None, NO),
+    "355": (TEAM_TOTALS_HOME, None, UNDER), "356": (TEAM_TOTALS_HOME, None, OVER),
+    "357": (TEAM_TOTALS_AWAY, None, UNDER), "358": (TEAM_TOTALS_AWAY, None, OVER),
+    "371": (TEAM_TOTALS_HOME, FIRST_HALF, UNDER), "372": (TEAM_TOTALS_HOME, FIRST_HALF, OVER),
+    "373": (TEAM_TOTALS_AWAY, FIRST_HALF, UNDER), "374": (TEAM_TOTALS_AWAY, FIRST_HALF, OVER),
+}
+LINE_BASES = {TOTALS, TEAM_TOTALS_HOME, TEAM_TOTALS_AWAY}
 # Status codes that mean "not bettable right now". Unknown codes are accepted.
 LOCKED_STATUSES = frozenset({"L", "B", "S", "D", "C", "X"})
 
@@ -60,6 +95,14 @@ class MonacobetProvider(SlovakProvider):
     SPORT_OPTION = "sport_codes"
     DEFAULT_SPORTS = {"football": "S", "hockey": "H", "basketball": "B", "tennis": "T"}
 
+    def fetch_detail_raw(self, event_id: Any) -> Any:
+        """The match page's full bet list, as the site sends it."""
+        return self._client.get_json(f"{BASE_URL}/match/{int(event_id)}", DETAIL_QUERY)
+
+    def fetch_names_raw(self) -> Any:
+        """MONACObet's dictionary of bet names per tip type code."""
+        return self._client.get_json(NAMES_URL, {"desktopVersion": "2.3.22", "locale": "sk"})
+
     def _fetch_payloads(self, sport: str, code: Any) -> list[Any]:
         leagues = (self.options.get("league_ids") or {}).get(sport)
         if leagues:
@@ -75,7 +118,19 @@ class MonacobetProvider(SlovakProvider):
                 continue
             prices: dict[str, float] = {}
             totals: dict[float, dict[str, float]] = {}
+            extras: list[tuple] = []
             for tip_type, by_special in (m.get("betMap") or {}).items():
+                extra = FOOTBALL_EXTRA_TIPS.get(str(tip_type)) if sport == "football" else None
+                if extra is not None and isinstance(by_special, dict):
+                    base, period, outcome = extra
+                    for sv, odd in by_special.items():
+                        if not isinstance(odd, dict) or str(odd.get("s", "")).upper() in LOCKED_STATUSES:
+                            continue
+                        price = usable_price(odd.get("ov"))
+                        line = half_line(_line(odd.get("sv", sv))) if base in LINE_BASES else None
+                        if price is not None and (line is not None or base not in LINE_BASES):
+                            extras.append((base, period, line, outcome, price))
+                    continue
                 code = tips.get(str(tip_type))
                 if code is None or not isinstance(by_special, dict):
                     continue
@@ -95,6 +150,7 @@ class MonacobetProvider(SlovakProvider):
                 bookmaker=cls.name, title=cls.title, native_id=m.get("id"), sport=sport,
                 start=epoch_ms_to_utc(m["kickOffTime"]), home=str(m["home"]), away=str(m["away"]),
                 prices=prices, totals=totals, fetched_at=fetched_at, betradar_id=betradar_digits(m.get("brMatchId")),
+                extra_markets=group_markets(extras, fetched_at),
             )
             if ev is not None:
                 events.append(ev)

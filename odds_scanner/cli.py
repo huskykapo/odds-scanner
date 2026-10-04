@@ -14,7 +14,7 @@ from odds_scanner import __version__
 from odds_scanner.arbitrage import BookRule, FinderSettings
 from odds_scanner.config import Config, load_config
 from odds_scanner.discovery import DiscoveryCache
-from odds_scanner.engine import LiveEngine, Source
+from odds_scanner.engine import DetailSettings, LiveEngine, Source
 from odds_scanner.errors import ConfigError, OddsScannerError
 from odds_scanner.matching import MatchSettings
 from odds_scanner.notifiers import ConsoleNotifier, DedupeCache, Notifier, TelegramNotifier, format_arb_table
@@ -150,6 +150,14 @@ def build_engine(cfg: Config) -> LiveEngine:
         logs=build_logs(cfg),
         dedupe_ttl=timedelta(minutes=cfg.notifications.dedupe_ttl_minutes),
         currency=cfg.currency,
+        detail_settings=DetailSettings(
+            enabled=cfg.details.enabled,
+            sports=frozenset(cfg.details.sports),
+            horizon=timedelta(hours=cfg.details.horizon_hours),
+            refresh=timedelta(seconds=cfg.details.refresh_seconds),
+            pause_seconds=cfg.details.pause_seconds,
+            max_matches=cfg.details.max_matches,
+        ),
         near_miss_floor=cfg.near_miss_percent or None,
         dashboard_options={
             "refresh_seconds": cfg.dashboard.refresh_seconds,
@@ -239,9 +247,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description="Scan bookmaker odds for arbitrage (surebet) opportunities. Alerts only - never places bets.",
         epilog="commands: run (default) - scan and serve the dashboard; probe - check each bookmaker endpoint once; "
         "probe-fortuna - check whether Fortuna's football page contains match data; "
-        "telegram-test - guided Telegram alert setup and test message.",
+        "telegram-test - guided Telegram alert setup and test message; "
+        "capture - save each bookmaker's raw responses into a ZIP (to add new bet types).",
     )
-    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test"))
+    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture"))
     ap.add_argument("-c", "--config", default="config.yaml", help="path to config file (default: %(default)s)")
     ap.add_argument("--once", action="store_true", help="scan once and exit instead of polling forever")
     ap.add_argument("--no-dashboard", action="store_true", help="do not start the web dashboard")
@@ -284,6 +293,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             from odds_scanner.probe import probe
 
             return probe(cfg)
+        if args.command == "capture":
+            from odds_scanner.capture import capture
+
+            print("Saving one copy of each bookmaker's odds (takes about a minute) ...", flush=True)
+            sources = build_sources(cfg)
+            try:
+                return 0 if capture(sources) else 1
+            finally:
+                for src in sources:
+                    src.provider.close()
         if args.command == "telegram-test":
             from odds_scanner.notifiers.telegram_setup import check_telegram
 

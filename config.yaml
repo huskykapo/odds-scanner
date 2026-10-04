@@ -33,6 +33,7 @@ providers:
     options:
       sport_ids: {football: 54}    # add hockey/basketball/tennis ids from the site's GetOfferList requests
       dates: [TD, TM]              # offer days requested ("TM" = tomorrow is verified)
+      top_values: [-1, 1]          # tried on the first poll; the one returning more matches is kept
   nike:
     poll_interval_seconds: 60
     options:
@@ -43,12 +44,12 @@ providers:
     poll_interval_seconds: 60
     options:
       category_ids: {football: "28"}   # add other sports' CategoryID from the site's requests
-      top: 50
+      top_values: [500, 200, 50]   # page sizes tried on the first poll; the biggest that works is kept
   synot:
     poll_interval_seconds: 60
     options:
       category_ids: {football: "28"}
-      top: 50
+      top_values: [500, 200, 50]   # page sizes tried on the first poll; the biggest that works is kept
   the_odds_api:                  # paid/quota-limited API - off by default
     enabled: false
     poll_interval_seconds: 600
@@ -59,6 +60,18 @@ providers:
 regions: [eu]
 markets: [h2h, totals]
 bookmakers: []
+
+# ---- match pages: over/under, handicaps, both teams to score, halves ... -------------------
+# The lists only carry the main result. For matches offered by 2+ bookmakers that start soon,
+# the app also opens each match page on DOXXbet, Tipos and Synot (one extra request per match),
+# and compares every bet type that can form a safe arb. MONACObet sends these in its list.
+details:
+  enabled: true
+  sports: [football]        # bet mapping verified for football
+  horizon_hours: 24         # only matches starting within this many hours
+  refresh_seconds: 240      # re-read each match page this often (prices older than 300 s are ignored)
+  pause_seconds: 3          # wait between two match pages of the same site
+  max_matches: 150          # per site, soonest kick-off first
 
 # ---- per-bookmaker money rules -------------------------------------------------------------
 # stake_step: round stakes to this (EUR). min_stake: the bookmaker's minimum bet.

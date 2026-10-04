@@ -1,0 +1,258 @@
+{
+ "_note": "Trimmed from GET /api-gw/nikeone/v1/boxes/search/portal?menu=/tenis (prematch), captured 2026-10-04 with `capture`. Tennis uses the header 'Víťaz zápasu'.",
+ "bets": [
+  {
+   "betId": "939834855",
+   "marketId": "367",
+   "sportEventId": "1018463444",
+   "header": "Víťaz zápasu",
+   "headerDetail": "Víťaz zápasu",
+   "headerFull": "Víťaz zápasu",
+   "betNumber": "188298",
+   "game": "Prematch",
+   "betOrder": 0.0,
+   "oddsOrder": 2.65,
+   "participantOrder": "Alexandrova E./Stollar F. - Bucsa C./Melichar-Martinez N.",
+   "expirationTime": "2026-10-05T05:00:00+02:00",
+   "selectionGrid": [
+    [
+     {
+      "row": 0,
+      "col": 0,
+      "bold": true,
+      "tip": "49",
+      "odds": 2.65,
+      "enabled": true,
+      "locked": false,
+      "flags": [],
+      "selected": false,
+      "type": "selection",
+      "name": "Alexandrova E./Stollar F."
+     },
+     {
+      "row": 0,
+      "col": 1,
+      "bold": true,
+      "tip": "50",
+      "odds": 1.43,
+      "enabled": true,
+      "locked": false,
+      "flags": [
+       "Popular"
+      ],
+      "selected": false,
+      "type": "selection",
+      "name": "Bucsa C./Melichar-Martinez N."
+     }
+    ]
+   ],
+   "rows": 1,
+   "cols": 2,
+   "visibleRows": 0,
+   "section": "Prematch",
+   "bettingState": "RUNNING",
+   "result": {
+    "homeScore": "",
+    "awayScore": "",
+    "scoreToShow": ""
+   },
+   "participants": [
+    "Alexandrova E./Stollar F.",
+    "Bucsa C./Melichar-Martinez N."
+   ],
+   "tournamentNote": "tvrdý povrch, WTA 1000",
+   "sportId": "7",
+   "extras": [],
+   "validationRules": {
+    "marketCombinationNumber": 0,
+    "marketExclusionNumber": 0,
+    "maxMultiple": 0,
+    "maxStake": 0,
+    "minMultiple": 0,
+    "minStake": 0
+   },
+   "combinationRules": {
+    "marketCombinable": false,
+    "tournamentAllowMarketCombinations": false,
+    "marketUniqueParticipantCheck": "none"
+   },
+   "betParticipants": [
+    {
+     "participantId": 412172,
+     "participantType": "team"
+    },
+    {
+     "participantId": 384458,
+     "participantType": "team"
+    }
+   ],
+   "betParams": [],
+   "combinableToBetBuilder": true
+  },
+  {
+   "betId": "939834875",
+   "marketId": "367",
+   "sportEventId": "1018475942",
+   "header": "Víťaz zápasu",
+   "headerDetail": "Víťaz zápasu",
+   "headerFull": "Víťaz zápasu",
+   "betNumber": "188318",
+   "game": "Prematch",
+   "betOrder": 0.0,
+   "oddsOrder": 2.1,
+   "participantOrder": "Aoyama S./Liang E. - Danilina A./Krawczyk D.",
+   "expirationTime": "2026-10-06T05:00:00+02:00",
+   "selectionGrid": [
+    [
+     {
+      "row": 0,
+      "col": 0,
+      "bold": true,
+      "tip": "49",
+      "odds": 2.1,
+      "enabled": true,
+      "locked": false,
+      "flags": [],
+      "selected": false,
+      "type": "selection",
+      "name": "Aoyama S./Liang E."
+     },
+     {
+      "row": 0,
+      "col": 1,
+      "bold": true,
+      "tip": "50",
+      "odds": 1.66,
+      "enabled": true,
+      "locked": false,
+      "flags": [
+       "Popular"
+      ],
+      "selected": false,
+      "type": "selection",
+      "name": "Danilina A./Krawczyk D."
+     }
+    ]
+   ],
+   "rows": 1,
+   "cols": 2,
+   "visibleRows": 0,
+   "section": "Prematch",
+   "bettingState": "RUNNING",
+   "result": {
+    "homeScore": "",
+    "awayScore": "",
+    "scoreToShow": ""
+   },
+   "participants": [
+    "Aoyama S./Liang E.",
+    "Danilina A./Krawczyk D."
+   ],
+   "tournamentNote": "tvrdý povrch, WTA 1000",
+   "sportId": "7",
+   "extras": [],
+   "validationRules": {
+    "marketCombinationNumber": 0,
+    "marketExclusionNumber": 0,
+    "maxMultiple": 0,
+    "maxStake": 0,
+    "minMultiple": 0,
+    "minStake": 0
+   },
+   "combinationRules": {
+    "marketCombinable": false,
+    "tournamentAllowMarketCombinations": false,
+    "marketUniqueParticipantCheck": "none"
+   },
+   "betParticipants": [
+    {
+     "participantId": 417683,
+     "participantType": "team"
+    },
+    {
+     "participantId": 438112,
+     "participantType": "team"
+    }
+   ],
+   "betParams": [],
+   "combinableToBetBuilder": true
+  }
+ ],
+ "sportEvents": [
+  {
+   "tournamentId": "1561",
+   "sportEventId": "1018475942",
+   "betCount": 10,
+   "statisticsId": "75239494",
+   "sportId": "7",
+   "isLive": false,
+   "participants": [
+    "Aoyama S./Liang E.",
+    "Danilina A./Krawczyk D."
+   ],
+   "expiration": "2026-10-06T05:00:00+02:00",
+   "sportName": "Tenis",
+   "tournamentName": "WTA Peking - štvorhra",
+   "matchHeaders": [
+    "Aoyama S./Liang E.",
+    "Danilina A./Krawczyk D."
+   ],
+   "externalReference": "1018475942",
+   "conflictingBetEvents": [],
+   "matchTemplate": "H2H",
+   "infoCentre": {
+    "liveTemplateId": 13,
+    "prematchTemplateId": 70
+   },
+   "streams": [
+    {
+     "id": "75239494",
+     "streamId": "75239494",
+     "streamParamId": "75239494",
+     "streamType": "LIVE_MATCH_TRACKER",
+     "streamState": "SCHEDULED",
+     "providerId": "25",
+     "providerName": "Betradar"
+    }
+   ]
+  },
+  {
+   "tournamentId": "1561",
+   "sportEventId": "1018463444",
+   "betCount": 10,
+   "statisticsId": "75230946",
+   "sportId": "7",
+   "isLive": false,
+   "participants": [
+    "Alexandrova E./Stollar F.",
+    "Bucsa C./Melichar-Martinez N."
+   ],
+   "expiration": "2026-10-05T05:00:00+02:00",
+   "sportName": "Tenis",
+   "tournamentName": "WTA Peking - štvorhra",
+   "matchHeaders": [
+    "Alexandrova E./Stollar F.",
+    "Bucsa C./Melichar-Martinez N."
+   ],
+   "externalReference": "1018463444",
+   "conflictingBetEvents": [],
+   "matchTemplate": "H2H",
+   "infoCentre": {
+    "liveTemplateId": 13,
+    "prematchTemplateId": 70
+   },
+   "streams": [
+    {
+     "id": "75230946",
+     "streamId": "75230946",
+     "streamParamId": "75230946",
+     "streamType": "LIVE_MATCH_TRACKER",
+     "streamState": "SCHEDULED",
+     "providerId": "25",
+     "providerName": "Betradar"
+    }
+   ]
+  }
+ ],
+ "hasMoreBets": false
+}

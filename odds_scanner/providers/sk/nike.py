@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
-from odds_scanner.markets import DC_CODES, usable_price
+from odds_scanner.markets import DC_CODES, TWO_WAY_SPORTS, usable_price
 from odds_scanner.models import Event
 from odds_scanner.providers.parsing import parse_datetime
 from odds_scanner.providers.sk.common import SlovakProvider, make_event
@@ -24,8 +24,11 @@ from odds_scanner.providers.sk.common import SlovakProvider, make_event
 log = logging.getLogger(__name__)
 
 URL = "https://www.nike.sk/api-gw/nikeone/v1/boxes/search/portal"
+DETAIL_URL = "https://www.nike.sk/api-gw/nikeone/v1/boxes/extended/sport-event-id"  # one match's full bet list
+DETAIL_BOX = "bi-1-1304-17378"  # as sent by the site's match page (2026-10-04)
 QUERY = "betNumbers&date&live=false&menu={menu}&minutes&order&prematch=true&results=false"
 MATCH_HEADER = "zápas"
+WINNER_HEADER = "víťaz zápasu"  # tennis: two-way match winner
 
 
 def _selections(row: Any) -> list[dict]:
@@ -44,6 +47,14 @@ class NikeProvider(SlovakProvider):
     homepage = "https://www.nike.sk"
     SPORT_OPTION = "menus"
     DEFAULT_SPORTS = {"football": "/futbal", "hockey": "/hokej", "basketball": "/basketbal", "tennis": "/tenis"}
+
+    def fetch_detail_raw(self, event_id: Any, box: bool = True, hide_collapsed: bool = True) -> Any:
+        """The match page's full bet list, as the site sends it."""
+        params = {"hideCollapsedMarkets": "true" if hide_collapsed else "false", "sportEventId": str(event_id),
+                  "ts": str(int(self._clock().timestamp() * 1000))}
+        if box:
+            params = {"boxId": self.options.get("detail_box", DETAIL_BOX), **params}
+        return self._client.get_json(DETAIL_URL, params)
 
     def _url(self, menu: str, page: int) -> str:
         url = f"{URL}?{QUERY.format(menu=quote(menu, safe='/'))}"
@@ -73,7 +84,10 @@ class NikeProvider(SlovakProvider):
         sport_events = {str(e.get("sportEventId")): e for e in payload.get("sportEvents") or [] if isinstance(e, dict)}
         events = []
         for bet in payload.get("bets") or []:
-            if str(bet.get("header", "")).strip().lower() != MATCH_HEADER:
+            header = str(bet.get("header", "")).strip().lower()
+            # "Víťaz zápasu" only for no-draw sports: in basketball it would be the overtime-inclusive
+            # winner, which must never be mixed with the regulation-time "Zápas" 1X2.
+            if header != MATCH_HEADER and not (header == WINNER_HEADER and sport in TWO_WAY_SPORTS):
                 continue
             if bet.get("game", "Prematch") != "Prematch" or bet.get("bettingState", "RUNNING") != "RUNNING":
                 continue

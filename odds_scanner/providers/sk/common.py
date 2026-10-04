@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from odds_scanner.errors import ProviderError
+from odds_scanner.errors import BlockedError, ProviderError
 from odds_scanner.markets import (
     DC_CODES,
     DOUBLE_CHANCE,
@@ -107,6 +108,38 @@ def build_markets(
     return tuple(markets)
 
 
+def half_line(value: Any) -> float | None:
+    """A betting line as float, or None unless it is a whole or half number.
+
+    Quarter lines (0.25, 1.75 ...) split the stake over two bets and settle differently from
+    site to site, so they are never compared.
+    """
+    try:
+        line = float(str(value).replace(",", ".").strip())
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(line) or (line * 2) % 1:
+        return None
+    return line
+
+
+def group_markets(entries: Iterable[tuple[str, str | None, float | None, str, float]], fetched_at: datetime) -> list[MarketOdds]:
+    """``(base, period, line, outcome, price)`` rows -> one MarketOdds per (base, period, line).
+
+    1X2 rows may include the double-chance codes 1X/12/X2: they become a separate
+    ``double_chance`` market of the same period. Duplicate outcomes keep the first price.
+    """
+    grouped: dict[tuple[str, str | None, float | None], dict[str, float]] = {}
+    for base, period, line, outcome, price in entries:
+        if base == H2H_3_WAY and outcome in DC_CODES:
+            base = DOUBLE_CHANCE
+        grouped.setdefault((base, period, line), {}).setdefault(outcome, price)
+    return [
+        MarketOdds(with_period(base, period), tuple(Outcome(o, p, line) for o, p in prices.items()), fetched_at)
+        for (base, period, line), prices in grouped.items()
+    ]
+
+
 def make_event(
     *,
     bookmaker: str,
@@ -121,9 +154,10 @@ def make_event(
     totals: Mapping[float, Mapping[str, float]] | None = None,
     betradar_id: str | None = None,
     url: str | None = None,
+    extra_markets: Iterable[MarketOdds] = (),
 ) -> Event | None:
     """One provider event with a single bookmaker; None when no usable market is left."""
-    markets = build_markets(sport, prices, totals, fetched_at)
+    markets = build_markets(sport, prices, totals, fetched_at) + tuple(extra_markets)
     if not markets or not home or not away:
         return None
     return Event(
@@ -193,6 +227,52 @@ class SlovakProvider(OddsProvider):
         sports.update({k: v for k, v in (self.options.get(self.SPORT_OPTION) or {}).items()})
         self.sport_params = {k: v for k, v in sports.items() if v not in (None, "")}
         self.samples: dict[str, str] = {str(k): str(v) for k, v in (self.options.get("sample_files") or {}).items()}
+        self.request_choice: dict[str, Any] = {}  # sport -> request setting picked by _fetch_best
+
+    def _fetch_best(self, sport: str, candidates: Sequence[Any], fetch: Callable[[Any], list[Any]], what: str) -> list[Any]:
+        """Use the request setting (e.g. a page size) that returns the most matches.
+
+        The sites' own pages send small values (top 50 / top matches only); bigger ones are not
+        verified, so on the first poll of a sport every candidate is tried once and the one that
+        yields the most events is kept. A candidate the site rejects is simply skipped. If the
+        kept one fails later, the choice is made again on the next poll.
+        """
+        chosen = self.request_choice.get(sport)
+        if chosen is not None or len(candidates) == 1:
+            value = chosen if chosen is not None else candidates[0]
+            try:
+                return fetch(value)
+            except BlockedError:
+                raise
+            except ProviderError:
+                self.request_choice.pop(sport, None)
+                raise
+        best: tuple[Any, int, list[Any]] | None = None
+        last_error: ProviderError | None = None
+        for value in candidates:
+            try:
+                payloads = fetch(value)
+            except BlockedError:
+                raise
+            except ProviderError as exc:
+                log.info("%s %s: %s=%r not accepted (%s)", self.title, sport, what, value, exc)
+                last_error = exc
+                continue
+            count = self._count_events(payloads, sport)
+            log.info("%s %s: %s=%r gives %d event(s)", self.title, sport, what, value, count)
+            if best is None or count > best[1]:
+                best = (value, count, payloads)
+        if best is None:
+            raise last_error or ProviderError(f"{self.title}: no request setting worked")
+        self.request_choice[sport] = best[0]
+        log.info("%s %s: using %s=%r", self.title, sport, what, best[0])
+        return best[2]
+
+    def _count_events(self, payloads: list[Any], sport: str) -> int:
+        try:
+            return sum(len(self._parse(p, sport, self._clock())) for p in payloads)
+        except Exception:  # noqa: BLE001 - an unparseable answer counts as the worst choice
+            return -1
 
     def supports(self, sport: str) -> bool:
         return sport in self.samples if self.samples else sport in self.sport_params

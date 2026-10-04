@@ -169,7 +169,7 @@ def test_protobuf_reader_basics():
 
 def test_tipos_request_body(monkeypatch):
     session = FakeSession(FakeResponse(json_body=load_sk("synot_football_standard_events.json")))
-    events = TiposProvider(client=client(session)).fetch_odds("football").events
+    events = TiposProvider(client=client(session), options={"top": 50}).fetch_odds("football").events
     url, body = session.calls[0]
     assert url == "https://tipkurz.etipos.sk/WebServices/Api/SportsBettingService.svc/GetWebStandardEvents"
     assert body["CategoryID"] == "28" and body["LanguageID"] == 17 and body["IncludeLiveCategories"] is False
@@ -241,3 +241,15 @@ def test_sample_files_option_replays_saved_responses(tmp_path):
     p = DoxxbetProvider(client=client(FakeSession()), options={"sample_files": {"football": str(f)}}, clock=lambda: NOW)
     assert len(p.fetch_odds("football").events) == 2
     assert p.supports("football") and not p.supports("hockey")  # only sports with a sample
+
+
+def test_nike_tennis_uses_viraz_zapasu_header():
+    events = NikeProvider.parse(load_sk("nike_tennis.json"), "tennis", NOW)
+    assert [(e.home_team, e.away_team) for e in events] == [
+        ("Alexandrova E./Stollar F.", "Bucsa C./Melichar-Martinez N."), ("Aoyama S./Liang E.", "Danilina A./Krawczyk D.")]
+    assert markets(events[0]) == {"h2h": {("1", None): 2.65, ("2", None): 1.43}}
+
+
+def test_nike_winner_header_is_never_used_outside_tennis():
+    # In basketball "Víťaz zápasu" would include overtime: it must not be read as the regulation 1X2.
+    assert NikeProvider.parse(load_sk("nike_tennis.json"), "basketball", NOW) == []

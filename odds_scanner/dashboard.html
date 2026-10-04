@@ -226,7 +226,8 @@ function render() {
     tbody.append(h("tr", {},
       h("td", {}, safeUrl(pr.homepage) ? h("a", { href: pr.homepage, target: "_blank", rel: "noopener noreferrer" }, pr.title) : pr.title),
       h("td", { class: "st-" + pr.status }, pr.status),
-      h("td", { class: "num" }, pr.events),
+      h("td", { class: "num", title: pr.details ? `${pr.details} match pages with over/under, handicaps ...` : "" },
+        pr.events, pr.details ? h("div", { class: "meta" }, `+${pr.details} detailed`) : null),
       h("td", {}, upd === null ? "–" : upd + "s ago"),
       h("td", { class: "meta hide-sm" }, pr.message || "")));
   }

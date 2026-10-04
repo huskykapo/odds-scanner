@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Sequence
 
@@ -25,7 +25,7 @@ from odds_scanner.errors import (
 )
 from odds_scanner.markets import market_title, outcome_title
 from odds_scanner.matching import MatchSettings, MatchStats, match_events
-from odds_scanner.models import Arbitrage, Event, NearMiss
+from odds_scanner.models import Arbitrage, Event, MarketOdds, NearMiss
 from odds_scanner.notifiers.base import Notifier
 from odds_scanner.notifiers.dedupe import DedupeCache
 from odds_scanner.providers.base import OddsProvider
@@ -70,13 +70,26 @@ class ProviderState:
     last_update: datetime | None = None
     last_attempt: datetime | None = None
     failures: int = 0
+    details: int = 0  # match pages currently held (over/under, handicaps ...)
 
     def as_dict(self, interval: float, homepage: str) -> dict[str, Any]:
         return {
             "key": self.key, "title": self.title, "status": self.status, "message": self.message,
-            "events": self.events, "last_update": _iso(self.last_update), "last_attempt": _iso(self.last_attempt),
+            "events": self.events, "details": self.details, "last_update": _iso(self.last_update), "last_attempt": _iso(self.last_attempt),
             "interval": interval, "homepage": homepage,
         }
+
+
+@dataclass(frozen=True)
+class DetailSettings:
+    """Fetching match pages (over/under, handicaps, ...) for matches quoted by 2+ bookmakers."""
+
+    enabled: bool = True
+    sports: frozenset[str] = frozenset({"football"})
+    horizon: timedelta = timedelta(hours=24)  # only matches starting within this
+    refresh: timedelta = timedelta(seconds=240)  # re-fetch a match page after this
+    pause_seconds: float = 3.0  # between two match pages of the same site (on top of 1 req/s)
+    max_matches: int = 150  # per site, soonest first
 
 
 class LiveEngine:
@@ -93,6 +106,7 @@ class LiveEngine:
         dashboard_options: dict[str, Any] | None = None,
         near_miss_floor: float | None = None,
         near_miss_limit: int = 50,
+        detail_settings: DetailSettings | None = None,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self.sources = list(sources)
@@ -121,6 +135,10 @@ class LiveEngine:
         self._stop = threading.Event()
         self._changed = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._detail = detail_settings or DetailSettings(enabled=False)
+        self._details: dict[str, tuple[tuple[MarketOdds, ...], datetime]] = {}  # provider event id -> markets
+        self._detail_tried: dict[str, datetime] = {}  # provider event id -> last attempt (ok or not)
+        self._detail_wanted: dict[str, list[tuple[datetime, str, str]]] = {}  # source -> (kick-off, id, sport)
 
     # ------------------------------------------------------------------ polling
     def poll(self, source: Source) -> float | None:
@@ -245,17 +263,27 @@ class LiveEngine:
             w.join()
 
     def _discover_one(self, src: Source, wanted: list[str], reference: dict[str, set[str]], cache: Any) -> None:
-        from odds_scanner.discovery import PROBES, discover
+        from odds_scanner.discovery import PROBES, QUICK, discover
 
         def found_one(sport: str, cid: int) -> None:
             self.add_sport(src, sport, cid)
             cache.record(src.key, found={sport: cid})
 
         try:
-            found = discover(
-                src.provider, PROBES[src.key], wanted, reference,
-                skip=getattr(src.provider, "sport_params", {}).values(), on_found=found_one, stop=self._stop,
-            )
+            found: dict[str, int] = {}
+            quick = QUICK.get(src.key)
+            if quick is not None:
+                for sport, cid in quick(src.provider).items():
+                    if sport in wanted:
+                        log.info("%s: %s has sport id %d (all-sports request)", src.title, sport, cid)
+                        found[sport] = cid
+                        found_one(sport, cid)
+            rest = [w for w in wanted if w not in found]
+            if rest:
+                found.update(discover(
+                    src.provider, PROBES[src.key], rest, reference,
+                    skip=getattr(src.provider, "sport_params", {}).values(), on_found=found_one, stop=self._stop,
+                ))
         except BlockedError:
             src.note = ""
             return  # normal polling reports the block
@@ -278,7 +306,9 @@ class LiveEngine:
         now = self._clock()
         with self._lock:
             events = [e for s in self.sources for sport in s.sports for e in self._snapshots.get((s.key, sport), ())]
+            events = [self._with_details(e) for e in events]
         merged, stats = match_events(events, self._match)
+        self._plan_details(merged, now)
         arbs, near = analyze_events(merged, self._settings, now=now, near_miss_floor=self._near_floor)
         first_seen = {a.identity: self._first_seen.get(a.identity, now) for a in arbs}
         new = [a for a in arbs if not self._seen.is_duplicate(a.dedupe_key)]
@@ -289,6 +319,88 @@ class LiveEngine:
             self.near_misses = near[: self._near_limit]
         self._publish(arbs, new)
         return arbs
+
+    # ------------------------------------------------------------------ match pages
+    def _with_details(self, event: Event) -> Event:
+        """The event with its match-page markets added (newer prices last, so they win)."""
+        found = self._details.get(event.id)
+        if not found or len(event.bookmakers) != 1:
+            return event
+        book = event.bookmakers[0]
+        return replace(event, bookmakers=(replace(book, markets=book.markets + found[0]),))
+
+    def _plan_details(self, merged: list[Event], now: datetime) -> None:
+        """Which match pages each site should fetch: matches on 2+ bookmakers, starting soon."""
+        if not self._detail.enabled:
+            return
+        detailed = {s.key for s in self.sources if self._has_pages(s)}
+        wanted: dict[str, list[tuple[datetime, str, str]]] = {k: [] for k in detailed}
+        for ev in merged:
+            if ev.sport_key not in self._detail.sports or not now < ev.commence_time <= now + self._detail.horizon:
+                continue
+            if len({b.key for b in ev.bookmakers}) < 2:
+                continue
+            for b in ev.bookmakers:
+                if b.key in detailed and b.event_id:
+                    wanted[b.key].append((ev.commence_time, b.event_id, ev.sport_key))
+        keep: set[str] = set()
+        with self._lock:
+            for key, rows in wanted.items():
+                rows.sort()
+                self._detail_wanted[key] = rows[: self._detail.max_matches]
+                keep.update(r[1] for r in self._detail_wanted[key])
+                self.states[key].details = sum(1 for r in self._detail_wanted[key] if r[1] in self._details)
+            for pid in [p for p in self._details if p not in keep]:
+                del self._details[pid]
+
+    @staticmethod
+    def _has_pages(source: Source) -> bool:
+        """The site has match pages to read (and we are not replaying saved samples)."""
+        return callable(getattr(source.provider, "fetch_detail", None)) and not getattr(source.provider, "samples", None)
+
+    def _next_detail(self, key: str, now: datetime) -> tuple[str, str] | None:
+        with self._lock:
+            rows = list(self._detail_wanted.get(key, ()))
+        due = [(self._detail_tried.get(pid, datetime.min.replace(tzinfo=timezone.utc)), start, pid, sport)
+               for start, pid, sport in rows
+               if now - self._detail_tried.get(pid, datetime.min.replace(tzinfo=timezone.utc)) >= self._detail.refresh]
+        if not due:
+            return None
+        _, _, pid, sport = min(due)  # never fetched first, then the oldest; ties: soonest kick-off
+        return pid, sport
+
+    def fetch_detail(self, source: Source, pid: str, sport: str) -> bool | None:
+        """Fetch one match page. True = stored, False = failed, None = the site blocked us."""
+        now = self._clock()
+        self._detail_tried[pid] = now
+        try:
+            markets = source.provider.fetch_detail(pid.split(":", 1)[1], sport)  # type: ignore[attr-defined]
+        except BlockedError as exc:
+            log.error("%s is blocking automated requests - stopped polling it: %s", source.title, exc)
+            self._finish(self.states[source.key], "blocked", str(exc), source)
+            return None
+        except ProviderError as exc:
+            log.debug("%s: match page %s failed: %s", source.title, pid, exc)
+            return False
+        except Exception:  # noqa: BLE001 - a parser bug must not kill the thread
+            log.exception("%s: match page %s: unexpected error", source.title, pid)
+            return False
+        with self._lock:
+            self._details[pid] = (tuple(markets), now)
+        self._changed.set()
+        return True
+
+    def _detail_loop(self, source: Source) -> None:
+        while not self._stop.is_set():
+            if self.states[source.key].status in ("blocked", "stopped"):
+                return
+            target = self._next_detail(source.key, self._clock())
+            if target is None:
+                self._stop.wait(5)
+                continue
+            if self.fetch_detail(source, *target) is None:
+                return
+            self._stop.wait(self._detail.pause_seconds)
 
     def _publish(self, arbs: list[Arbitrage], new: list[Arbitrage]) -> None:
         for n in self._notifiers:
@@ -336,7 +448,7 @@ class LiveEngine:
                         "bookmaker": leg.bookmaker_title,
                         "bookmaker_key": leg.bookmaker_key,
                         "outcome": leg.outcome,
-                        "outcome_label": outcome_title(leg.outcome, a.home_team, a.away_team, a.line),
+                        "outcome_label": outcome_title(leg.outcome, a.home_team, a.away_team, a.line, a.market),
                         "odds": leg.odds,
                         "effective_odds": leg.effective_odds or leg.odds,
                         "stake": leg.stake,
@@ -379,7 +491,7 @@ class LiveEngine:
                 "legs": [
                     {
                         "bookmaker": leg.bookmaker_title,
-                        "outcome_label": outcome_title(leg.outcome, m.home_team, m.away_team, m.line),
+                        "outcome_label": outcome_title(leg.outcome, m.home_team, m.away_team, m.line, m.market),
                         "odds": leg.odds,
                         "effective_odds": leg.effective_odds or leg.odds,
                         "updated": _iso(leg.odds_updated),
@@ -403,10 +515,17 @@ class LiveEngine:
 
     # ------------------------------------------------------------------ threads
     def run_once(self) -> list[Arbitrage]:
-        """Poll every provider once (sequentially) and analyse - for ``--once``."""
+        """Poll every provider once (sequentially), fetch the wanted match pages, analyse - for ``--once``."""
         for s in self.sources:
             if s.sports:
                 self.poll(s)
+        arbs = self.analyze()
+        if not self._detail.enabled:
+            return arbs
+        for s in self.sources:
+            for _, pid, sport in list(self._detail_wanted.get(s.key, ())):
+                if self.fetch_detail(s, pid, sport) is None:
+                    break
         return self.analyze()
 
     def start(self, analyze_every: float = 3.0) -> None:
@@ -415,6 +534,12 @@ class LiveEngine:
                 t = threading.Thread(target=self._provider_loop, args=(s,), name=f"poll-{s.key}", daemon=True)
                 t.start()
                 self._threads.append(t)
+        if self._detail.enabled:
+            for s in self.sources:
+                if s.sports and self._has_pages(s):
+                    t = threading.Thread(target=self._detail_loop, args=(s,), name=f"detail-{s.key}", daemon=True)
+                    t.start()
+                    self._threads.append(t)
         t = threading.Thread(target=self._analyzer_loop, args=(analyze_every,), name="analyzer", daemon=True)
         t.start()
         self._threads.append(t)
