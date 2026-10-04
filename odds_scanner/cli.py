@@ -158,6 +158,28 @@ def build_engine(cfg: Config) -> LiveEngine:
     )
 
 
+def history_reader(cfg: Config):
+    """Callable for the dashboard: the grouped arb log, with each leg's stake rules and net odds."""
+    from odds_scanner.markets import effective_odds
+    from odds_scanner.storage.history import read_history
+
+    settings = finder_settings(cfg)
+    titles = {cls.title: key for key, cls in SK_PROVIDERS.items()}
+    s = cfg.storage
+    sqlite_path = s.sqlite_path if s.backend in ("sqlite", "both") else None
+    csv_path = s.csv_path if s.backend in ("csv", "both") else None
+
+    def extras(key: str, title: str, odds: float) -> dict:
+        rule = settings.rule(key or titles.get(title, ""))
+        return {
+            "effective_odds": effective_odds(odds, rule.stake_fee, rule.win_tax),
+            "step": rule.stake_step or settings.stake_rounding,
+            "min_stake": rule.min_stake,
+        }
+
+    return lambda: read_history(sqlite_path, csv_path, leg_extras=extras)
+
+
 def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) -> int:
     from odds_scanner.dashboard import Dashboard, lan_ip
 
@@ -177,7 +199,7 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
     dash = None
     if dashboard:
         try:
-            dash = Dashboard(engine.snapshot, cfg.dashboard.host, cfg.dashboard.port)
+            dash = Dashboard(engine.snapshot, cfg.dashboard.host, cfg.dashboard.port, get_history=history_reader(cfg))
         except OSError as exc:
             raise ConfigError(f"cannot open the dashboard on port {cfg.dashboard.port}: {exc}") from exc
         dash.start()

@@ -50,6 +50,13 @@
   .st-ok { color: var(--ok); font-weight: 600; } .st-error { color: var(--warn); font-weight: 600; }
   .st-blocked, .st-stopped { color: var(--bad); font-weight: 600; } .st-starting { color: var(--muted); }
   details summary { cursor: pointer; font-weight: 600; margin: 16px 0 6px; }
+  .sum { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg); display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
+  .sum b { font-size: 15px; } .sum .win { color: var(--ok); } .sum .loss { color: var(--bad); }
+  .hist .ev { font-size: 14px; } .hist { padding: 10px 12px; }
+  .calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px 12px; align-items: end; }
+  .calc label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+  .calc input { width: 100%; }
+  .more { display: block; margin: 8px auto; }
   .disclaimer { color: var(--muted); font-size: 12px; margin-top: 24px; }
   @media (max-width: 640px) {
     .hide-sm { display: none; }
@@ -69,6 +76,24 @@
 </header>
 <main>
   <div id="arbs"></div>
+
+  <details id="calc-box">
+    <summary>Calculator - enter odds yourself</summary>
+    <div class="card">
+      <div class="calc">
+        <label>Odds outcome 1 <input id="c1" inputmode="decimal" placeholder="e.g. 2.10"></label>
+        <label>Odds outcome 2 <input id="c2" inputmode="decimal" placeholder="e.g. 2.05"></label>
+        <label>Odds outcome 3 (optional) <input id="c3" inputmode="decimal" placeholder="draw, for 1X2"></label>
+        <label>Round stakes to <input id="cstep" inputmode="decimal" value="0.5"></label>
+      </div>
+      <div id="calc-out" class="meta" style="margin-top:8px">Uses the bankroll at the top. Enter the odds of every outcome of one market (each from the bookmaker that offers it best).</div>
+    </div>
+  </details>
+
+  <details id="hist-box" open>
+    <summary>History - arbs found earlier <span class="meta" id="hist-count"></span></summary>
+    <div id="history"></div>
+  </details>
 
   <details open>
     <summary>Providers</summary>
@@ -175,7 +200,7 @@ function render() {
         h("td", { class: "num" }, odds),
         h("td", { class: "num stake" }, stakeText(p.stakes[i])),
         h("td", {}, btn),
-        h("td", { class: "num hide-sm" }, money(p.payouts[i])),
+        h("td", { class: "num" }, money(p.payouts[i])),
         h("td", { class: "num " + (oddsAge > 120 ? "age-old" : "") }, oddsAge === null ? "?" : oddsAge + "s"));
     });
     box.append(h("div", { class: "card" + (isNew ? " new" : "") + (dead ? " dead" : "") },
@@ -189,10 +214,9 @@ function render() {
         h("div", { class: "profit" + (p.pct < 1 ? " small" : "") }, dead ? "rounding kills it" : p.pct.toFixed(2) + " %")),
       h("table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "Bookmaker"), h("th", {}, "Bet"), h("th", { class: "num" }, "Odds"),
-          h("th", { class: "num" }, "Stake"), h("th", {}, ""), h("th", { class: "num hide-sm" }, "Payout"), h("th", { class: "num" }, "Age"))),
+          h("th", { class: "num" }, "Stake"), h("th", {}, ""), h("th", { class: "num", title: "what you get back if this bet wins (stake included)" }, "Returns"), h("th", { class: "num" }, "Age"))),
         h("tbody", {}, legs)),
-      h("div", { class: "totals" }, `Total stake ${money(p.total)} ${state.currency} · guaranteed profit `,
-        h("b", {}, `${money(p.profit)} ${state.currency}`), age !== null ? h("span", { class: "meta" }, ` · seen ${age}s ago`) : null)));
+      summary(p, state.currency, age !== null ? `seen ${age}s ago` : null)));
   }
 
   const tbody = $("providers").tBodies[0]; tbody.replaceChildren();
@@ -217,6 +241,83 @@ function render() {
 }
 function r_is(row, a) { return row && row.a === a; }
 
+// "Bet 600 → you get back at least 660 → profit 60 (10 %)"
+function summary(p, cur, note) {
+  const cls = p.profit > 0 ? "win" : "loss";
+  return h("div", { class: "sum" },
+    h("span", {}, "You bet ", h("b", {}, `${money(p.total)} ${cur}`)),
+    h("span", {}, "you get back at least ", h("b", {}, `${money(p.total + p.profit)} ${cur}`)),
+    h("span", { class: cls }, p.profit > 0 ? "profit " : "loss ", h("b", {}, `${money(Math.abs(p.profit))} ${cur} (${p.pct.toFixed(2)} %)`)),
+    note ? h("span", { class: "meta" }, note) : null);
+}
+
+// ------------------------------------------------------------------ history
+let history = [], histShown = 30, histTimer = null;
+async function loadHistory() {
+  try {
+    const r = await fetch("/api/history", { cache: "no-store" });
+    if (r.ok) { history = await r.json(); renderHistory(); }
+  } catch (e) {}
+  clearTimeout(histTimer);
+  histTimer = setTimeout(loadHistory, 30000);
+}
+function renderHistory() {
+  const bankroll = parseFloat($("bankroll").value) || (state && state.bankroll) || 100;
+  const cur = (state && state.currency) || "EUR";
+  const sport = $("sport").value;
+  const items = history.filter((x) => !sport || x.sport === sport);
+  $("hist-count").textContent = items.length ? `(${items.length})` : "";
+  const box = $("history"); box.replaceChildren();
+  if (!items.length) { box.append(h("div", { class: "card empty" }, "Nothing found yet. Every arb the scanner finds is kept here (also in data/arbs.csv and data/arbs.db).")); return; }
+  const now = Date.now();
+  for (const x of items.slice(0, histShown)) {
+    const p = plan(x.legs, bankroll);
+    const started = x.start && Date.parse(x.start) < now;
+    const legs = x.legs.map((l, i) => h("tr", {},
+      h("td", {}, l.bookmaker), h("td", {}, l.outcome_label), h("td", { class: "num" }, l.odds.toFixed(2)),
+      h("td", { class: "num stake" }, stakeText(p.stakes[i])), h("td", { class: "num" }, money(p.payouts[i]))));
+    const seen = x.times > 1 ? `found ${fmtTime(x.first_found)} – last ${fmtTime(x.last_found)}, logged ${x.times}×` : `found ${fmtTime(x.first_found)}`;
+    box.append(h("div", { class: "card hist" + (started ? " dead" : "") },
+      h("div", { class: "head" },
+        h("div", {},
+          h("div", { class: "ev" }, x.event, started ? h("span", { class: "badge b-push" }, "started") : null),
+          h("div", { class: "meta" }, `${x.sport} · kick-off ${x.start ? fmtTime(x.start) : "?"} · ${x.market_label} · ${seen}`)),
+        h("div", { class: "profit small" }, x.profit.toFixed(2) + " %")),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Bookmaker"), h("th", {}, "Bet"), h("th", { class: "num" }, "Odds"),
+          h("th", { class: "num" }, "Stake"), h("th", { class: "num" }, "Returns"))),
+        h("tbody", {}, legs)),
+      summary(p, cur, "best odds seen; prices have probably changed since")));
+  }
+  if (items.length > histShown) {
+    const more = h("button", { type: "button", class: "more" }, `show more (${items.length - histShown} older)`);
+    more.addEventListener("click", () => { histShown += 50; renderHistory(); });
+    box.append(more);
+  }
+}
+
+// ------------------------------------------------------------------ manual calculator
+function num(id) { const v = parseFloat(String($(id).value).replace(",", ".")); return Number.isFinite(v) ? v : null; }
+function renderCalc() {
+  const bankroll = parseFloat($("bankroll").value) || (state && state.bankroll) || 100;
+  const cur = (state && state.currency) || "EUR";
+  const step = num("cstep") && num("cstep") > 0 ? num("cstep") : 0.01;
+  const odds = ["c1", "c2", "c3"].map(num).filter((o) => o !== null);
+  const out = $("calc-out");
+  if (odds.length < 2 || odds.some((o) => o <= 1)) { out.className = "meta"; out.textContent = "Enter at least two odds greater than 1."; return; }
+  const legs = odds.map((o) => ({ effective_odds: o, step, min_stake: 0 }));
+  const p = plan(legs, bankroll);
+  const margin = (1 - odds.reduce((s, o) => s + 1 / o, 0)) * 100;
+  out.className = "";
+  out.replaceChildren(
+    h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, "Outcome"), h("th", { class: "num" }, "Odds"), h("th", { class: "num" }, "Stake"), h("th", { class: "num" }, "Returns if it wins"))),
+      h("tbody", {}, odds.map((o, i) => h("tr", {}, h("td", {}, `outcome ${i + 1}`), h("td", { class: "num" }, o.toFixed(2)),
+        h("td", { class: "num stake" }, stakeText(p.stakes[i])), h("td", { class: "num" }, money(p.payouts[i])))))),
+    summary(p, cur, margin > 0 ? "this is an arbitrage" : "not an arbitrage: these odds lose money whatever happens"));
+}
+for (const id of ["c1", "c2", "c3", "cstep"]) $(id).addEventListener("input", renderCalc);
+
 async function refresh() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
@@ -231,11 +332,12 @@ async function refresh() {
   clearTimeout(timer);
   timer = setTimeout(refresh, ((state && state.refresh_seconds) || 3) * 1000);
 }
-$("bankroll").addEventListener("input", () => { store.set("bankroll", $("bankroll").value); render(); });
-$("sport").addEventListener("change", () => { store.set("sport", $("sport").value); render(); });
+$("bankroll").addEventListener("input", () => { store.set("bankroll", $("bankroll").value); render(); renderHistory(); renderCalc(); });
+$("sport").addEventListener("change", () => { store.set("sport", $("sport").value); render(); renderHistory(); });
 const savedSport = store.get("sport");
 if (savedSport) $("sport").append(h("option", { value: savedSport, selected: "" }, savedSport));
 refresh();
+loadHistory();
 </script>
 </body>
 </html>

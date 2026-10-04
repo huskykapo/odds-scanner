@@ -168,3 +168,23 @@ def test_sqlite_log(tmp_path, arbs):
     ).fetchall()
     assert [l[:3] for l in legs] == [("Jan Kovac", "AlphaBet", 2.10), ("Luca Moretti", "BetaPlay", 2.05)]
     con.close()
+
+
+def test_sqlite_log_can_be_written_from_another_thread(tmp_path, arbs):
+    import threading
+
+    log_ = SqliteArbLog(tmp_path / "t.db")  # opened here, written by the engine's analyzer thread
+    errors = []
+
+    def write():
+        try:
+            log_.append(arbs)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t = threading.Thread(target=write)
+    t.start()
+    t.join()
+    log_.close()
+    assert errors == []
+    assert sqlite3.connect(tmp_path / "t.db").execute("SELECT COUNT(*) FROM arbs").fetchone()[0] == len(arbs)

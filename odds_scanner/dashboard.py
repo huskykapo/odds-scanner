@@ -19,7 +19,9 @@ log = logging.getLogger(__name__)
 PAGE = Path(__file__).with_name("dashboard.html")
 
 
-def make_handler(get_state: Callable[[], dict[str, Any]], page: bytes) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    get_state: Callable[[], dict[str, Any]], page: bytes, get_history: Callable[[], Any] | None = None
+) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "odds-scanner"
 
@@ -27,9 +29,10 @@ def make_handler(get_state: Callable[[], dict[str, Any]], page: bytes) -> type[B
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", page)
-            elif path == "/api/state":
+            elif path in ("/api/state", "/api/history"):
+                source = get_state if path == "/api/state" else (get_history or (lambda: []))
                 try:
-                    body = json.dumps(get_state(), ensure_ascii=False).encode("utf-8")
+                    body = json.dumps(source(), ensure_ascii=False).encode("utf-8")
                 except Exception:  # noqa: BLE001
                     log.exception("building dashboard state failed")
                     self._send(500, "text/plain; charset=utf-8", b"internal error")
@@ -56,8 +59,14 @@ def make_handler(get_state: Callable[[], dict[str, Any]], page: bytes) -> type[B
 
 
 class Dashboard:
-    def __init__(self, get_state: Callable[[], dict[str, Any]], host: str = "0.0.0.0", port: int = 8765) -> None:
-        self._server = ThreadingHTTPServer((host, port), make_handler(get_state, PAGE.read_bytes()))
+    def __init__(
+        self,
+        get_state: Callable[[], dict[str, Any]],
+        host: str = "0.0.0.0",
+        port: int = 8765,
+        get_history: Callable[[], Any] | None = None,
+    ) -> None:
+        self._server = ThreadingHTTPServer((host, port), make_handler(get_state, PAGE.read_bytes(), get_history))
         self._server.daemon_threads = True
         self._thread: threading.Thread | None = None
 

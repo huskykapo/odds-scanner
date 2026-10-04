@@ -253,3 +253,51 @@ def test_probe_fortuna_detects_data_or_not():
     lines = []
     assert probe_fortuna(lines.append, session=FakeSession(FakeResponse(status=403, text="denied"))) == 1
     assert "BLOCKED" in lines[0]
+
+
+# ------------------------------------------------------------------ history
+def test_history_groups_logged_arbs_and_serves_them(tmp_path):
+    from odds_scanner.storage import CsvArbLog, SqliteArbLog
+    from odds_scanner.storage.history import read_history
+
+    merged, _ = match_events(sample_events())
+    (arb,) = find_arbitrages(merged, SETTINGS, now=NOW)
+    better = replace(arb, profit_percent=arb.profit_percent + 1, found_at=NOW + timedelta(minutes=5))
+    db, csv_file = SqliteArbLog(tmp_path / "a.db"), CsvArbLog(tmp_path / "a.csv")
+    for sink in (db, csv_file):
+        sink.append([arb])
+        sink.append([better])
+    db.close()
+    for hist in (read_history(tmp_path / "a.db", None), read_history(None, tmp_path / "a.csv")):
+        (one,) = hist  # same match + market: one entry
+        assert one["times"] == 2 and one["profit"] == pytest.approx(better.profit_percent, abs=1e-3)
+        assert one["first_found"].startswith("2026-10-04T12:00") and one["last_found"].startswith("2026-10-04T12:05")
+        assert [l["outcome_label"] for l in one["legs"]] == ["1 (FC Košice)", "X (draw)", "2 (Komárno)"]
+        assert one["market_label"] == "1X2"
+    assert read_history(tmp_path / "missing.db", None) == []
+
+    eng = engine(*mono_nike_sources())
+    dash = Dashboard(eng.snapshot, "127.0.0.1", 0, get_history=lambda: read_history(tmp_path / "a.db", None))
+    dash.start()
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        served = json.loads(opener.open(f"http://127.0.0.1:{dash.port}/api/history", timeout=5).read())
+        assert served[0]["event"] == "FC Košice vs Komárno" and served[0]["times"] == 2
+    finally:
+        dash.stop()
+
+
+def test_cli_history_reader_adds_stake_rules(tmp_path):
+    from odds_scanner.storage import SqliteArbLog
+
+    merged, _ = match_events(sample_events())
+    (arb,) = find_arbitrages(merged, SETTINGS, now=NOW)
+    log_ = SqliteArbLog(tmp_path / "a.db")
+    log_.append([arb])
+    log_.close()
+    cfg = config_from_dict({"storage": {"backend": "sqlite", "sqlite_path": str(tmp_path / "a.db")},
+                            "bookmaker_settings": {"nike": {"stake_step": 1, "min_stake": 2, "stake_fee": 10}}})
+    (one,) = cli.history_reader(cfg)()
+    nike_leg = next(l for l in one["legs"] if l["bookmaker_key"] == "nike")
+    assert nike_leg["step"] == 1 and nike_leg["min_stake"] == 2
+    assert nike_leg["effective_odds"] == pytest.approx(4.6 * 0.9)  # 10 % stake fee, no win tax

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Sequence
 
@@ -45,13 +46,15 @@ class SqliteArbLog(ArbLog):
         path = Path(path)
         if str(path) != ":memory:":
             path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(path))
+        # The live engine opens the log on the main thread and writes from its analyzer thread.
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._lock = threading.Lock()
         self._conn.executescript(SCHEMA)
 
     def append(self, arbs: Sequence[Arbitrage]) -> None:
         if not arbs:
             return
-        with self._conn:  # one transaction per batch
+        with self._lock, self._conn:  # one transaction per batch
             for arb in arbs:
                 cur = self._conn.execute(
                     "INSERT INTO arbs (found_at, sport, event_id, event, commence_time, market, line,"
@@ -73,4 +76,5 @@ class SqliteArbLog(ArbLog):
                 )
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
