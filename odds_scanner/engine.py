@@ -186,15 +186,12 @@ class LiveEngine:
             events = [e for s in self.sources for sport in s.sports for e in self._snapshots.get((s.key, sport), ())]
         merged, stats = match_events(events, self._match)
         arbs = find_arbitrages(merged, self._settings, now=now)
-        current = {a.identity for a in arbs}
-        self._first_seen = {k: v for k, v in self._first_seen.items() if k in current}
-        for a in arbs:
-            self._first_seen.setdefault(a.identity, now)
+        first_seen = {a.identity: self._first_seen.get(a.identity, now) for a in arbs}
         new = [a for a in arbs if not self._seen.is_duplicate(a.dedupe_key)]
         for a in new:
             self._seen.remember(a.dedupe_key)
         with self._lock:
-            self.arbs, self.stats, self.last_analysis = arbs, stats, now
+            self.arbs, self.stats, self.last_analysis, self._first_seen = arbs, stats, now, first_seen
         self._publish(arbs, new)
         return arbs
 
@@ -217,14 +214,14 @@ class LiveEngine:
     # ------------------------------------------------------------------ dashboard state
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            arbs, stats, analysed = list(self.arbs), self.stats, self.last_analysis
+            arbs, stats, analysed, first_seen = list(self.arbs), self.stats, self.last_analysis, self._first_seen
         rules = self._settings
         homepages = {s.key: s.homepage for s in self.sources}
         out_arbs = []
         for a in arbs:
             out_arbs.append({
                 "id": a.identity,
-                "first_seen": _iso(self._first_seen.get(a.identity)),
+                "first_seen": _iso(first_seen.get(a.identity)),
                 "event": a.event_name,
                 "home": a.home_team,
                 "away": a.away_team,

@@ -28,6 +28,13 @@ EXIT_CONFIG = 2
 
 
 def setup_logging(level: str) -> None:
+    # Team and bookmaker names are Slovak ("Niké", "Košice"): never crash on a console or a
+    # redirected file whose encoding cannot show them.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     logging.basicConfig(level=level.upper(), format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     # urllib3 logs full request URLs at DEBUG, and The Odds API takes its key as a query
     # parameter - never let that reach the console, whatever --log-level says.
