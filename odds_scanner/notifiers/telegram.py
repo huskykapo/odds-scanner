@@ -13,7 +13,7 @@ import requests
 from odds_scanner.errors import ConfigError, NotificationError
 from odds_scanner.models import Arbitrage
 from odds_scanner.notifiers.base import Notifier
-from odds_scanner.notifiers.console import market_label, money, money2
+from odds_scanner.notifiers.console import leg_label, market_label, money, money2
 from odds_scanner.notifiers.dedupe import DedupeCache
 
 log = logging.getLogger(__name__)
@@ -29,9 +29,14 @@ def format_message(arb: Arbitrage, currency: str = "") -> str:
         f"<b>Arb {arb.realized_profit_percent:.2f}%</b> - {html.escape(arb.event_name)}",
         f"{html.escape(arb.sport_key)} | {html.escape(market_label(arb))} | starts {starts}",
     ]
+    if arb.verify_manually:
+        lines.append("<b>VERIFY MANUALLY</b> - unusually high profit, likely a pricing error or stale odds")
     for leg in arb.legs:
+        book = html.escape(leg.bookmaker_title)
+        if leg.url and leg.url.startswith(("https://", "http://")):
+            book = f'<a href="{html.escape(leg.url, quote=True)}">{book}</a>'
         lines.append(
-            f"- {html.escape(leg.outcome)} @ <b>{leg.odds:.2f}</b> on {html.escape(leg.bookmaker_title)}: "
+            f"- {html.escape(leg_label(arb, leg))} @ <b>{leg.odds:.2f}</b> on {book}: "
             f"stake {money(leg.stake)}{unit} (pays {money2(leg.payout)}{unit})"
         )
     lines.append(
@@ -42,6 +47,7 @@ def format_message(arb: Arbitrage, currency: str = "") -> str:
 
 
 class TelegramNotifier(Notifier):
+    handles_dedupe = True  # give it every current arb; it sends each one once
     def __init__(
         self,
         token: str,
@@ -50,6 +56,7 @@ class TelegramNotifier(Notifier):
         dedupe: DedupeCache,
         currency: str = "",
         max_per_cycle: int = 10,
+        min_profit_percent: float | None = None,
         session: requests.Session | None = None,
         timeout: float = 10.0,
     ) -> None:
@@ -58,6 +65,7 @@ class TelegramNotifier(Notifier):
         self._dedupe = dedupe
         self._currency = currency
         self._max_per_cycle = max_per_cycle
+        self._min_profit = min_profit_percent
         self._session = session or requests.Session()
         self._timeout = timeout
 
@@ -76,6 +84,8 @@ class TelegramNotifier(Notifier):
     def notify(self, arbs: Sequence[Arbitrage]) -> None:
         sent = 0
         for arb in arbs:
+            if self._min_profit is not None and arb.realized_profit_percent < self._min_profit:
+                continue
             if self._dedupe.is_duplicate(arb.dedupe_key):
                 continue
             if sent >= self._max_per_cycle:

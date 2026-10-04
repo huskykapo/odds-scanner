@@ -37,3 +37,7 @@ class RateLimitError(ProviderError):
 
 class NotificationError(OddsScannerError):
     """A notification could not be delivered."""
+
+
+class BlockedError(ProviderError):
+    """The site refused us (HTTP 403, captcha or bot-check page). We stop polling it - never try to bypass it."""

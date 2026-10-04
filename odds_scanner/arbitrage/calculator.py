@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from typing import Sequence
 
 # Float tolerance: three-way odds of exactly 3.0 must not look like an arb
@@ -66,12 +66,19 @@ def _round_to_unit(value: float, unit: float) -> float:
     return float(steps * d_unit)
 
 
-def calculate_stakes(odds: Sequence[float], bankroll: float, rounding: float = 0.01) -> StakePlan:
+def calculate_stakes(
+    odds: Sequence[float],
+    bankroll: float,
+    rounding: float | Sequence[float] = 0.01,
+    *,
+    min_stakes: Sequence[float] | None = None,
+) -> StakePlan:
     """Split ``bankroll`` over the outcomes so every outcome pays (almost) the same.
 
     Ideal stake: ``bankroll * (1/odds_i) / sum(1/odds)``. Stakes are then rounded to a
-    multiple of ``rounding`` (a bookmaker-friendly unit such as 1.0 or 0.5) and payouts,
-    total stake and profit are **recalculated from the rounded stakes**, so the returned
+    multiple of ``rounding`` (a bookmaker-friendly unit such as 1.0 or 0.5; one unit for all
+    legs or one per leg) and raised to ``min_stakes[i]`` where a bookmaker has a minimum bet.
+    Payouts, total stake and profit are **recalculated from the final stakes**, so the returned
     numbers describe what you would really place. Rounding can shrink the total stake
     below the bankroll and can push the profit down, even negative for tiny bankrolls.
 
@@ -80,11 +87,21 @@ def calculate_stakes(odds: Sequence[float], bankroll: float, rounding: float = 0
     """
     if isinstance(bankroll, bool) or not isinstance(bankroll, (int, float)) or not math.isfinite(bankroll) or bankroll <= 0:
         raise ValueError(f"bankroll must be a positive finite number, got {bankroll!r}")
-    if not isinstance(rounding, (int, float)) or not math.isfinite(rounding) or rounding <= 0:
-        raise ValueError(f"rounding unit must be a positive finite number, got {rounding!r}")
+    units = [rounding] * len(odds) if isinstance(rounding, (int, float)) else list(rounding)
+    if len(units) != len(odds):
+        raise ValueError("need one rounding unit per outcome")
+    for unit in units:
+        if isinstance(unit, bool) or not isinstance(unit, (int, float)) or not math.isfinite(unit) or unit <= 0:
+            raise ValueError(f"rounding unit must be a positive finite number, got {unit!r}")
+    minimums = list(min_stakes) if min_stakes is not None else [0.0] * len(odds)
+    if len(minimums) != len(odds):
+        raise ValueError("need one minimum stake per outcome")
 
     total_inv = inverse_sum(odds)  # validates odds
-    stakes = tuple(_round_to_unit(bankroll * (1.0 / o) / total_inv, rounding) for o in odds)
+    stakes = tuple(
+        max(_round_to_unit(bankroll * (1.0 / o) / total_inv, unit), _round_up_to_unit(m, unit) if m > 0 else 0.0)
+        for o, unit, m in zip(odds, units, minimums)
+    )
     payouts = tuple(round(s * o, 6) for s, o in zip(stakes, odds))
     total_stake = round(math.fsum(stakes), 6)
     profits = tuple(round(p - total_stake, 6) for p in payouts)
@@ -99,3 +116,10 @@ def calculate_stakes(odds: Sequence[float], bankroll: float, rounding: float = 0
         guaranteed_profit=guaranteed,
         profit_percent=pct,
     )
+
+
+def _round_up_to_unit(value: float, unit: float) -> float:
+    """Smallest multiple of ``unit`` that is >= ``value`` (a minimum stake must be met, not rounded away)."""
+    d_unit = Decimal(str(unit))
+    steps = (Decimal(str(value)) / d_unit).to_integral_value(rounding=ROUND_CEILING)
+    return float(steps * d_unit)

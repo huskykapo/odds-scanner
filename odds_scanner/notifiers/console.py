@@ -6,8 +6,11 @@ import sys
 from datetime import timezone
 from typing import Sequence, TextIO
 
-from odds_scanner.models import Arbitrage
+from odds_scanner.markets import market_title, outcome_title, split_period
+from odds_scanner.models import Arbitrage, ArbLeg
 from odds_scanner.notifiers.base import Notifier
+
+_LEGACY_LABELS = frozenset({"h2h", "totals", "spreads", "btts", "draw_no_bet"})
 
 HEADERS = ("Profit", "Event", "Starts (UTC)", "Market", "Bet", "Odds", "Bookmaker", "Stake", "Payout")
 RIGHT_ALIGNED = {"Profit", "Odds", "Stake", "Payout"}
@@ -23,13 +26,22 @@ def money2(value: float) -> str:
 
 
 def market_label(arb: Arbitrage) -> str:
-    if arb.line is None:
-        label = arb.market
-    elif arb.market == "spreads":
-        label = f"spreads (home {arb.line:+g})"
+    base, period = split_period(arb.market)
+    if period is None and base in _LEGACY_LABELS:
+        if arb.line is None:
+            label = arb.market
+        elif arb.market == "spreads":
+            label = f"spreads (home {arb.line:+g})"
+        else:
+            label = f"{arb.market} {arb.line:g}"
     else:
-        label = f"{arb.market} {arb.line:g}"
+        label = market_title(arb.market, arb.line)
     return label + (" [push risk]" if arb.push_possible else "")
+
+
+def leg_label(arb: Arbitrage, leg: ArbLeg) -> str:
+    """Outcome as a reader understands it: ``1 (Košice)`` rather than ``1``."""
+    return outcome_title(leg.outcome, arb.home_team, arb.away_team, arb.line)
 
 
 def _rows(arb: Arbitrage) -> list[list[str]]:
@@ -39,11 +51,11 @@ def _rows(arb: Arbitrage) -> list[list[str]]:
         first = i == 0
         rows.append(
             [
-                f"{arb.realized_profit_percent:.2f}%" if first else "",
+                (f"{arb.realized_profit_percent:.2f}%" + ("!" if arb.verify_manually else "")) if first else "",
                 arb.event_name if first else "",
                 starts if first else "",
                 market_label(arb) if first else "",
-                leg.outcome,
+                leg_label(arb, leg),
                 f"{leg.odds:.2f}",
                 leg.bookmaker_title,
                 money(leg.stake),
@@ -77,6 +89,8 @@ def format_arb_table(arbs: Sequence[Arbitrage], currency: str = "") -> str:
         lines.extend(fmt(r) for r in block)
         unit = f" {currency}" if currency else ""
         lines.append(f"  -> total stake {money2(arb.total_stake)}{unit}, guaranteed profit {money2(arb.guaranteed_profit)}{unit}")
+        if arb.verify_manually:
+            lines.append("  !! unusually high profit - verify manually (likely a pricing error or stale odds)")
         lines.append(rule)
     return "\n".join(lines)
 

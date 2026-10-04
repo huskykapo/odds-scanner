@@ -29,6 +29,8 @@ class BookmakerOdds:
     title: str
     markets: tuple[MarketOdds, ...]
     last_update: datetime | None = None
+    url: str | None = None  # direct link to the match on the bookmaker's site, when known
+    event_name: str | None = None  # the bookmaker's own spelling of the match (after merging)
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class Event:
     home_team: str
     away_team: str
     bookmakers: tuple[BookmakerOdds, ...]
+    betradar_id: str | None = None  # Betradar (Sportradar) match id, digits only, when the source has one
 
     @property
     def name(self) -> str:
@@ -65,7 +68,11 @@ class ArbLeg:
     bookmaker_title: str
     odds: float
     stake: float
-    payout: float  # stake * odds
+    payout: float  # stake * effective odds
+    effective_odds: float | None = None  # odds after the bookmaker's stake fee / win tax (None = same as odds)
+    odds_updated: datetime | None = None  # when this price was fetched
+    url: str | None = None  # direct link to the match at this bookmaker, when known
+    event_name: str | None = None  # the bookmaker's own name for the match
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,9 @@ class Arbitrage:
     guaranteed_profit: float  # worst case, after rounding
     realized_profit_percent: float  # guaranteed_profit / total_stake, after rounding
     found_at: datetime
+    verify_manually: bool = False  # suspiciously high profit: probably a pricing error or stale odds
+    home_team: str | None = None
+    away_team: str | None = None
 
     @property
     def bookmakers(self) -> tuple[str, ...]:
@@ -92,7 +102,13 @@ class Arbitrage:
     @property
     def push_possible(self) -> bool:
         """Whole-number totals/spreads lines can be refunded ("push"), voiding the guarantee."""
-        return self.market in ("totals", "spreads") and self.line is not None and float(self.line).is_integer()
+        base = self.market.partition("@")[0]
+        return base in ("totals", "spreads") and self.line is not None and float(self.line).is_integer()
+
+    @property
+    def identity(self) -> str:
+        """Same opportunity regardless of the exact prices (event, market, line)."""
+        return f"{self.event_id}/{self.market}/{self.line}"
 
     @property
     def dedupe_key(self) -> str:
