@@ -10,6 +10,7 @@ from odds_scanner.models import Event
 from odds_scanner.providers.parsing import parse_events
 
 SAMPLE = Path(__file__).resolve().parent.parent / "sample_data" / "sample_odds.json"
+SK_SAMPLES = Path(__file__).resolve().parent.parent / "sample_data" / "sk"
 
 # The sample file's "fresh" timestamps are 30s before this instant.
 NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
@@ -33,11 +34,12 @@ def sample_events() -> dict[str, Event]:
 
 
 class FakeResponse:
-    def __init__(self, status=200, json_body=None, headers=None, text_json=True):
+    def __init__(self, status=200, json_body=None, headers=None, text_json=True, text=""):
         self.status_code = status
         self._body = json_body
         self.headers = CaseInsensitiveDict(headers or {})
         self._valid = text_json
+        self.text = text
 
     def json(self):
         if not self._valid:
@@ -69,3 +71,9 @@ class FakeSession:
 
     def close(self):
         self.closed = True
+
+
+def load_sk(name: str):
+    import json
+
+    return json.loads((SK_SAMPLES / name).read_text(encoding="utf-8"))
