@@ -23,10 +23,11 @@ from odds_scanner.errors import (
     QuotaExhaustedError,
     RateLimitError,
 )
-from odds_scanner.markets import market_title, outcome_title
+from odds_scanner.markets import market_title, outcome_title, sport_family
 from odds_scanner.matching import MatchSettings, MatchStats, match_events
 from odds_scanner.models import Arbitrage, Event, MarketOdds, NearMiss
 from odds_scanner.notifiers.base import Notifier
+from odds_scanner.opportunities import GONE, VERIFIED, Opportunity, OpportunityRegistry, ValidationSettings
 from odds_scanner.notifiers.dedupe import DedupeCache
 from odds_scanner.providers.base import OddsProvider
 from odds_scanner.storage.base import ArbLog
@@ -107,6 +108,7 @@ class LiveEngine:
         near_miss_floor: float | None = None,
         near_miss_limit: int = 50,
         detail_settings: DetailSettings | None = None,
+        validation: ValidationSettings | None = None,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self.sources = list(sources)
@@ -127,9 +129,9 @@ class LiveEngine:
         self._near_floor = near_miss_floor or None  # 0 / None = do not compute near misses
         self._near_limit = near_miss_limit
         self.near_misses: list[NearMiss] = []
-        self._seen = DedupeCache(dedupe_ttl, clock=clock)
-        self._first_seen: dict[str, datetime] = {}
-        self.arbs: list[Arbitrage] = []
+        self.registry = OpportunityRegistry(validation or ValidationSettings(), settings)
+        self._generations: dict[str, int] = {src.key: 0 for src in self.sources}  # successful polls per provider
+        self.arbs: list[Arbitrage] = []  # current candidates, enriched with status/confidence
         self.stats = MatchStats()
         self.last_analysis: datetime | None = None
         self._stop = threading.Event()
@@ -188,6 +190,8 @@ class LiveEngine:
             notes.append("not configured: " + ", ".join(source.skipped_sports))
         state.message = "; ".join(notes)
         if ok:
+            with self._lock:
+                self._generations[source.key] += 1
             state.status, state.failures, state.last_update = "ok", 0, self._clock()
         else:
             state.status = "error"
@@ -302,22 +306,20 @@ class LiveEngine:
 
     # ------------------------------------------------------------------ analysis
     def analyze(self) -> list[Arbitrage]:
-        """Match events across providers, find arbs, publish new ones. Returns all current arbs."""
+        """Match events across providers, find candidates, validate them and announce what is due."""
         now = self._clock()
         with self._lock:
             events = [e for s in self.sources for sport in s.sports for e in self._snapshots.get((s.key, sport), ())]
             events = [self._with_details(e) for e in events]
         merged, stats = match_events(events, self._match)
         self._plan_details(merged, now)
-        arbs, near = analyze_events(merged, self._settings, now=now, near_miss_floor=self._near_floor)
-        first_seen = {a.identity: self._first_seen.get(a.identity, now) for a in arbs}
-        new = [a for a in arbs if not self._seen.is_duplicate(a.dedupe_key)]
-        for a in new:
-            self._seen.remember(a.dedupe_key)
+        candidates, near = analyze_events(merged, self._settings, now=now, near_miss_floor=self._near_floor)
         with self._lock:
-            self.arbs, self.stats, self.last_analysis, self._first_seen = arbs, stats, now, first_seen
+            self.registry.update(candidates, now, dict(self._generations))
+            arbs = [o.arb for o in self.registry.current()]
+            self.arbs, self.stats, self.last_analysis = arbs, stats, now
             self.near_misses = near[: self._near_limit]
-        self._publish(arbs, new)
+        self._publish()
         return arbs
 
     # ------------------------------------------------------------------ match pages
@@ -402,67 +404,165 @@ class LiveEngine:
                 return
             self._stop.wait(self._detail.pause_seconds)
 
-    def _publish(self, arbs: list[Arbitrage], new: list[Arbitrage]) -> None:
-        for n in self._notifiers:
-            batch = arbs if n.handles_dedupe else new
-            if not batch:
+    def _publish(self) -> None:
+        """Offer each notifier/log the opportunities it has not been told about; ack what it handled.
+
+        What is "due" is decided by the registry (verified; new, returned, or ROI moved). A sink that
+        fails, or hands back only part of the batch, is simply not acked and is offered the rest again.
+        """
+        with self._lock:
+            jobs = [(f"notifier:{i}:{type(n).__name__}", n.notify, self.registry.due(f"notifier:{i}:{type(n).__name__}"))
+                    for i, n in enumerate(self._notifiers)]
+            jobs += [(f"log:{i}:{type(k).__name__}", k.append, self.registry.due(f"log:{i}:{type(k).__name__}", renotify=False))
+                     for i, k in enumerate(self._logs)]
+        for key, deliver, due in jobs:
+            if not due:
                 continue
             try:
-                n.notify(batch)
+                handled = deliver([o.arb for o in due])
             except Exception:  # noqa: BLE001 - isolation boundary between independent sinks
-                log.exception("%s failed", type(n).__name__)
-        if new:
-            for sink in self._logs:
-                try:
-                    sink.append(new)
-                except Exception:  # noqa: BLE001
-                    log.exception("%s failed", type(sink).__name__)
+                log.exception("%s failed", key.split(":", 2)[2])
+                continue
+            done = {o.fingerprint for o in due} if handled is None else {a.fingerprint for a in handled}
+            with self._lock:
+                self.registry.ack(key, [o for o in due if o.fingerprint in done])
+
+    # ------------------------------------------------------------------ RECHECK
+    RECHECK_COOLDOWN = 5.0  # seconds between rechecks of the same opportunity
+
+    def _refresh(self, source: Source, sport: str) -> None:
+        """Fetch one sport of one provider right now (same throttled client as the poll threads)."""
+        result = source.provider.fetch_odds(sport, **source.fetch_kwargs)
+        with self._lock:
+            self._snapshots[(source.key, sport)] = list(result.events)
+            self._generations[source.key] += 1
+
+    def recheck(self, fingerprint: str) -> dict[str, Any]:
+        """Re-fetch ONLY the bookmakers (and sport) of one opportunity, recalculate, report the verdict.
+
+        STILL_AVAILABLE only if every involved bookmaker was re-fetched successfully and the arb is
+        still found; NO_LONGER_AVAILABLE if it was re-fetched and the arb is gone; UNKNOWN if any
+        re-fetch failed (never claims validity from stale data). Read-only: nothing is ever submitted.
+        """
+        now = self._clock()
+        with self._lock:
+            opp = self.registry.get(fingerprint)
+            if opp is None or opp.status == GONE:
+                return {"status": "UNKNOWN", "message": "This opportunity is no longer tracked (it ended, or the scanner restarted).",
+                        "opportunity": None, "changes": [], "refreshed": [], "errors": [], "checked_at": _iso(now)}
+            if opp.last_recheck is not None and (now - opp.last_recheck).total_seconds() < self.RECHECK_COOLDOWN:
+                return {"status": "COOLDOWN", "message": f"Rechecked a moment ago - wait {self.RECHECK_COOLDOWN:.0f} seconds between checks.",
+                        "opportunity": self.opportunity_dict(opp), "changes": [], "refreshed": [], "errors": [], "checked_at": _iso(now)}
+            opp.last_recheck = now
+            before = opp.arb
+        by_key = {s.key: s for s in self.sources}
+        refreshed: list[str] = []
+        errors: list[str] = []
+        done: set[tuple[str, str]] = set()
+        for leg in before.legs:
+            src = by_key.get(leg.bookmaker_key)
+            if src is None:
+                errors.append(f"{leg.bookmaker_title}: not a configured source")
+                continue
+            sport = next((sp for sp in src.sports if sp == before.sport_key or sport_family(sp) == sport_family(before.sport_key)), None)
+            if sport is None:
+                errors.append(f"{leg.bookmaker_title}: sport {before.sport_key!r} is not polled")
+                continue
+            if (src.key, sport) in done:
+                continue
+            done.add((src.key, sport))
+            try:
+                self._refresh(src, sport)
+                refreshed.append(leg.bookmaker_title)
+            except BlockedError:
+                errors.append(f"{leg.bookmaker_title}: the site refused the request (blocked)")
+            except ProviderError as exc:
+                errors.append(f"{leg.bookmaker_title}: {exc}")
+            except Exception as exc:  # noqa: BLE001 - report, never crash the request handler
+                errors.append(f"{leg.bookmaker_title}: unexpected {type(exc).__name__}")
+        self.analyze()
+        with self._lock:
+            after = self.registry.get(fingerprint)
+            present = after is not None and after.status != GONE and self.registry.seen_now(fingerprint)
+            card = self.opportunity_dict(after) if after is not None and present else None
+            changes = []
+            if present:
+                for old, new in zip(before.legs, after.arb.legs):
+                    if (old.odds, old.stake) != (new.odds, new.stake):
+                        changes.append({"bookmaker": new.bookmaker_title, "outcome": new.outcome, "old_odds": old.odds,
+                                        "new_odds": new.odds, "old_stake": old.stake, "new_stake": new.stake})
+        checked_at = _iso(self._clock())
+        if errors:
+            return {"status": "UNKNOWN", "message": "Could not re-fetch every bookmaker, so the opportunity cannot be confirmed: " + "; ".join(errors),
+                    "opportunity": card, "changes": changes, "refreshed": refreshed, "errors": errors, "checked_at": checked_at}
+        if present and after.status != "FAILED":
+            return {"status": "STILL_AVAILABLE", "message": f"Arbitrage still available: ROI {after.roi:.2f}% on the fresh prices.",
+                    "opportunity": card, "changes": changes, "refreshed": refreshed, "errors": [], "checked_at": checked_at}
+        why = "it failed validation on the fresh prices" if present else "the combination no longer exists on the fresh prices"
+        return {"status": "NO_LONGER_AVAILABLE", "message": f"Arbitrage no longer available: {why}.", "opportunity": card,
+                "changes": changes, "refreshed": refreshed, "errors": [], "checked_at": checked_at}
 
     # ------------------------------------------------------------------ dashboard state
+    def opportunity_dict(self, opp: Opportunity) -> dict[str, Any]:
+        """One opportunity as the dashboard shows it."""
+        a, rules = opp.arb, self._settings
+        homepages = {s.key: s.homepage for s in self.sources}
+        return {
+            "id": a.identity,
+            "fingerprint": opp.fingerprint,
+            "status": opp.status,
+            "episode": opp.episode,
+            "confidence": opp.confidence.score,
+            "confidence_label": opp.confidence.label,
+            "confidence_reasons": list(opp.confidence.reasons),
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking} for c in opp.validation.checks],
+            "first_seen": _iso(opp.first_seen),
+            "last_seen": _iso(opp.last_seen),
+            "verified_at": _iso(opp.verified_at),
+            "odds_age": a.odds_age_seconds,
+            "roi": round(a.realized_profit_percent, 4),
+            "peak_roi": round(opp.peak_roi, 4),
+            "return": round(a.total_stake + a.guaranteed_profit, 2),
+            "event": a.event_name,
+            "home": a.home_team,
+            "away": a.away_team,
+            "sport": a.sport_key,
+            "start": _iso(a.commence_time),
+            "market": a.market,
+            "market_label": market_title(a.market, a.line),
+            "line": a.line,
+            "profit": round(a.realized_profit_percent, 4),
+            "theoretical_profit": round(a.profit_percent, 4),
+            "verify": a.verify_manually,
+            "push_possible": a.push_possible,
+            "total_stake": a.total_stake,
+            "guaranteed_profit": a.guaranteed_profit,
+            "legs": [
+                {
+                    "bookmaker": leg.bookmaker_title,
+                    "bookmaker_key": leg.bookmaker_key,
+                    "outcome": leg.outcome,
+                    "outcome_label": outcome_title(leg.outcome, a.home_team, a.away_team, a.line, a.market),
+                    "odds": leg.odds,
+                    "effective_odds": leg.effective_odds or leg.odds,
+                    "stake": leg.stake,
+                    "payout": leg.payout,
+                    "updated": _iso(leg.odds_updated),
+                    "url": leg.url,
+                    "homepage": homepages.get(leg.bookmaker_key, ""),
+                    "event_name": leg.event_name,
+                    "step": rules.rule(leg.bookmaker_key).stake_step or rules.stake_rounding,
+                    "min_stake": rules.rule(leg.bookmaker_key).min_stake,
+                }
+                for leg in a.legs
+            ],
+        }
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            arbs, stats, analysed, first_seen = list(self.arbs), self.stats, self.last_analysis, self._first_seen
+            opps, stats, analysed = self.registry.current(), self.stats, self.last_analysis
+            out_arbs = [self.opportunity_dict(o) for o in opps]
         rules = self._settings
-        homepages = {s.key: s.homepage for s in self.sources}
-        out_arbs = []
-        for a in arbs:
-            out_arbs.append({
-                "id": a.identity,
-                "first_seen": _iso(first_seen.get(a.identity)),
-                "event": a.event_name,
-                "home": a.home_team,
-                "away": a.away_team,
-                "sport": a.sport_key,
-                "start": _iso(a.commence_time),
-                "market": a.market,
-                "market_label": market_title(a.market, a.line),
-                "line": a.line,
-                "profit": round(a.realized_profit_percent, 4),
-                "theoretical_profit": round(a.profit_percent, 4),
-                "verify": a.verify_manually,
-                "push_possible": a.push_possible,
-                "total_stake": a.total_stake,
-                "guaranteed_profit": a.guaranteed_profit,
-                "legs": [
-                    {
-                        "bookmaker": leg.bookmaker_title,
-                        "bookmaker_key": leg.bookmaker_key,
-                        "outcome": leg.outcome,
-                        "outcome_label": outcome_title(leg.outcome, a.home_team, a.away_team, a.line, a.market),
-                        "odds": leg.odds,
-                        "effective_odds": leg.effective_odds or leg.odds,
-                        "stake": leg.stake,
-                        "payout": leg.payout,
-                        "updated": _iso(leg.odds_updated),
-                        "url": leg.url,
-                        "homepage": homepages.get(leg.bookmaker_key, ""),
-                        "event_name": leg.event_name,
-                        "step": rules.rule(leg.bookmaker_key).stake_step or rules.stake_rounding,
-                        "min_stake": rules.rule(leg.bookmaker_key).min_stake,
-                    }
-                    for leg in a.legs
-                ],
-            })
         return {
             "now": _iso(self._clock()),
             "last_analysis": _iso(analysed),

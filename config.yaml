@@ -101,6 +101,14 @@ dashboard:
   highlight_seconds: 120
   open_browser: true   # open the dashboard in your browser when the scanner starts
 
+# ---- validation: an arb is only announced after these checks pass --------------------------------
+validation:
+  max_odds_age_seconds: 180        # every leg's price must be at most this old
+  confirm_polls: 1                 # a fresh poll of EACH involved bookmaker must still show it (0 = alert at once)
+  renotify_roi_delta: 1.0          # alert again only if the ROI moved by this many percentage points...
+  renotify_min_interval_seconds: 300   # ...and not more often than this
+  gone_after_seconds: 30           # unseen this long = it ended; if it comes back it is announced again
+
 # ---- notifications -----------------------------------------------------------------------
 notifications:
   console: true                     # print each new arb in the terminal
@@ -109,7 +117,8 @@ notifications:
     token_env: TELEGRAM_BOT_TOKEN   # name of the env var holding the bot token
     chat_id_env: TELEGRAM_CHAT_ID   # name of the env var holding the chat id
     min_profit_percent: null        # alert threshold; null = min_profit_percent
-  dedupe_ttl_minutes: 60            # don't re-send / re-log an identical arb within this window
+  dashboard_url:                    # e.g. http://192.168.1.20:8765  -> adds an "OPEN DASHBOARD" link to Telegram alerts
+  dedupe_ttl_minutes: 60            # (legacy --replay mode only; the live scanner uses the validation: rules above)
   max_per_cycle: 10                 # cap on Telegram messages per analysis
 
 # ---- logging every arb found ---------------------------------------------------------------

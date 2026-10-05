@@ -7,11 +7,13 @@ from odds_scanner.models import Arbitrage
 
 
 class Notifier(ABC):
-    """Receives the arbitrages found in one polling cycle (possibly none)."""
+    """Receives the arbitrages it should announce this cycle (possibly none).
 
-    # False: the live engine only passes arbs that are new. True: it passes every current arb
-    # and the notifier de-duplicates itself (so a failed send is retried on the next cycle).
-    handles_dedupe = False
+    The live engine decides *what* is due (new, returned, ROI moved, ...). A notifier returns the
+    arbs it dealt with - delivered, or deliberately skipped (e.g. below its own threshold) - or
+    ``None`` meaning all of them. Arbs it could not deliver are left out of the result, so the engine
+    offers them again next cycle instead of losing the alert.
+    """
 
     @abstractmethod
-    def notify(self, arbs: Sequence[Arbitrage]) -> None: ...
+    def notify(self, arbs: Sequence[Arbitrage]) -> Sequence[Arbitrage] | None: ...

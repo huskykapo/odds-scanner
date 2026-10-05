@@ -17,6 +17,7 @@ from odds_scanner.discovery import DiscoveryCache
 from odds_scanner.engine import DetailSettings, LiveEngine, Source
 from odds_scanner.errors import ConfigError, OddsScannerError
 from odds_scanner.matching import MatchSettings
+from odds_scanner.opportunities import ValidationSettings
 from odds_scanner.notifiers import ConsoleNotifier, DedupeCache, Notifier, TelegramNotifier, format_arb_table
 from odds_scanner.providers import OddsProvider, ReplayProvider, TheOddsApiProvider
 from odds_scanner.providers.sk import SK_PROVIDERS
@@ -55,7 +56,8 @@ def build_provider(cfg: Config) -> tuple[OddsProvider, Config]:
     )
 
 
-def build_notifiers(cfg: Config) -> list[Notifier]:
+def build_notifiers(cfg: Config, *, own_dedupe: bool = True) -> list[Notifier]:
+    """``own_dedupe=False`` under the live engine: its opportunity registry decides what is announced."""
     n = cfg.notifications
     notifiers: list[Notifier] = []
     if n.console:
@@ -65,10 +67,11 @@ def build_notifiers(cfg: Config) -> list[Notifier]:
             TelegramNotifier.from_env(
                 n.telegram.token_env,
                 n.telegram.chat_id_env,
-                dedupe=DedupeCache(timedelta(minutes=n.dedupe_ttl_minutes)),
+                dedupe=DedupeCache(timedelta(minutes=n.dedupe_ttl_minutes)) if own_dedupe else None,
                 currency=cfg.currency,
                 max_per_cycle=n.max_per_cycle,
                 min_profit_percent=n.telegram.min_profit_percent,
+                dashboard_url=n.dashboard_url,
             )
         )
     return notifiers
@@ -135,6 +138,18 @@ def finder_settings(cfg: Config) -> FinderSettings:
     )
 
 
+def validation_settings(cfg: Config) -> ValidationSettings:
+    v = cfg.validation
+    return ValidationSettings(
+        max_odds_age=timedelta(seconds=v.max_odds_age_seconds),
+        confirm_polls=int(v.confirm_polls),
+        renotify_roi_delta=v.renotify_roi_delta,
+        renotify_min_interval=timedelta(seconds=v.renotify_min_interval_seconds),
+        gone_after=timedelta(seconds=v.gone_after_seconds),
+        verify_above_percent=cfg.verify_above_percent,
+    )
+
+
 def build_engine(cfg: Config) -> LiveEngine:
     sources = build_sources(cfg)
     if not sources:
@@ -146,8 +161,9 @@ def build_engine(cfg: Config) -> LiveEngine:
         match_settings=MatchSettings.from_raw_aliases(
             m.aliases, time_tolerance=timedelta(minutes=m.time_tolerance_minutes), threshold=m.name_threshold
         ),
-        notifiers=build_notifiers(cfg),
+        notifiers=build_notifiers(cfg, own_dedupe=False),
         logs=build_logs(cfg),
+        validation=validation_settings(cfg),
         dedupe_ttl=timedelta(minutes=cfg.notifications.dedupe_ttl_minutes),
         currency=cfg.currency,
         detail_settings=DetailSettings(
@@ -193,6 +209,8 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
     from odds_scanner.dashboard import Dashboard, lan_ip
 
     if once:
+        # A one-shot scan cannot get a second poll to confirm anything: skip that step, results are a snapshot.
+        engine.registry.settings = replace(engine.registry.settings, confirm_polls=0)
         try:
             arbs = engine.run_once()
         finally:
