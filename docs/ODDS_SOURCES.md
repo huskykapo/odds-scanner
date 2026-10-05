@@ -23,7 +23,7 @@ Last documentation update: 2026-10-05.
 |---|---|---|---|---|
 | MONACObet, DOXXbet, Niké, Tipos, Synot tip | **WORKING** (tested by the project owner on 2026-10-04/05) | the site's own public JSON endpoints | yes, anonymous | yes |
 | Tipsport SK | **BLOCKED** (tested 2026-10-05) | public `/rest/offer/...` (research lead) | no: the home page itself returns a 403 bot-check | n/a |
-| Chance SK | **UNVERIFIED / likely BLOCKED** | same platform as Tipsport (lead) | earlier manual check: 403 bot-check | n/a |
+| Chance SK | **BLOCKED** (tested 2026-10-05) | same platform as Tipsport (lead) | no: the home page itself returns a 403 bot-check | n/a |
 | Roobet | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no official API found | free tiers unlikely to include it |
 | Stake | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no public odds API | free tiers unlikely to include it |
 
@@ -76,12 +76,16 @@ normal, anonymous 200 response would reopen this.
 
 ## Chance SK  (priority 2)
 
-Same as Tipsport (group sibling, `https://www.chance.sk`). Earlier manual check: 403 bot-check page.
-The same platform is a *lead*, not proof: ids, JSON shape and market codes must be verified
-separately. Run `py start.py diagnostics chance`. A dedicated adapter will be written (sharing a base
-class with Tipsport only if the structures really are the same) only if a public endpoint works.
+| | |
+|---|---|
+| Source | Public site `https://www.chance.sk` (group sibling of Tipsport; same REST paths were the lead) |
+| Tested by diagnostics | **2026-10-05, from the project owner's own PC: `BLOCKED`.** 1 request (`GET https://www.chance.sk/`, honest User-Agent): HTTP 403, `text/html`, 3754 bytes, a captcha/bot-check page; the site set 1 cookie. The probe stopped at once: nothing retried, no workaround attempted. Matches the earlier manual check of 2026-10-04 |
+| Public vs authenticated | not observed (blocked before any endpoint was reached) |
+| Pre-match / live | unknown |
+| Known restrictions | The site refuses automated clients at the home page. Per project rules this approach ends here (no cookie reuse, header or User-Agent tricks, headless-browser evasion, proxies or retries). No adapter will be built for this source |
+| Fallback | an odds aggregator that licenses Chance data (not yet researched), or leave Chance out |
 
----
+Re-run `py start.py diagnostics chance` occasionally; only a normal anonymous 200 response would reopen this.
 
 ## Roobet  (priority 3)
 
@@ -119,4 +123,4 @@ class with Tipsport only if the structures really are the same) only if a public
 | Continuous scanning of an aggregator | a plan with at least ~1 request per 30-60 s per sport, or WebSocket streaming |
 
 ## Changelog
-- 2026-10-05: Tipsport SK tested from the owner's PC: BLOCKED (403 bot-check at the home page). Initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.
+- 2026-10-05: Tipsport SK and Chance SK tested from the owner's PC: both BLOCKED (403 bot-check at the home page). Initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.
