@@ -500,6 +500,8 @@ def check_odds_api() -> BookmakerReport:
 
 
 # ---------------------------------------------------------------------- rendering / entry point
+AGGREGATORS = ("oddspapi", "sportmonks")  # key-based coverage checks; only run when named, never by "all"
+
 REPORT_FIELDS = (
     ("BOOKMAKER", "bookmaker"), ("SOURCE", "source"), ("STATUS", "status"), ("HTTP/API STATUS", "http_status"),
     ("EVENT COUNT", "events"), ("MARKET COUNT", "markets"), ("ODDS COUNT", "odds"),
@@ -517,7 +519,7 @@ def render(report: BookmakerReport) -> str:
 def available_targets() -> list[str]:
     from odds_scanner.providers.sk import SK_PROVIDERS
 
-    return [*SITES, "roobet", "stake", *SK_PROVIDERS, "the_odds_api"]
+    return [*SITES, "roobet", "stake", *SK_PROVIDERS, "the_odds_api", *AGGREGATORS]
 
 
 def run(target: str, *, out: Callable[[str], None] = print, session_factory: Callable[[], Any] = new_session,
@@ -525,7 +527,7 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
     """Run one diagnostic (or ``all``). Exit code 0 = reachable and usable, 1 = not usable, 2 = unknown target."""
     from odds_scanner.providers.sk import SK_PROVIDERS
 
-    targets = available_targets() if target == "all" else [target]
+    targets = [t for t in available_targets() if t not in AGGREGATORS] if target == "all" else [target]
     code = 0
     for i, name in enumerate(targets):
         if name in SITES:
@@ -539,6 +541,10 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
             report = check_unimplemented(name)
         elif name == "the_odds_api":
             report = check_odds_api()
+        elif name in AGGREGATORS:
+            from odds_scanner import coverage
+
+            report = coverage.check_oddspapi() if name == "oddspapi" else coverage.check_sportmonks()
         else:
             out(f"unknown bookmaker {name!r}; choose one of: all, {', '.join(available_targets())}")
             return 2
