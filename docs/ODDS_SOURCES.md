@@ -204,6 +204,21 @@ Roobet are selectable on Solo, the refund terms, and the price/freshness of the 
 yearly), then run `py start.py diagnostics oddsapiio --save oddsapiio_samples` in the first hour (one command: bookmaker list, upcoming events,
 one event's odds) and compare the odds with your own Stake and Roobet accounts.
 
+### Odds-API.io bookmaker list - TESTED 2026-10-05 (project owner's PC, **no key needed**)
+
+`py start.py diagnostics oddsapiio`: the bookmaker list is public; **372 bookmakers**.
+
+| Group | Found | Not in the list |
+|---|---|---|
+| Crypto | **Roobet**, **Stake** (+ Stake.bet.br), **Mystake**, BC.Game, 1xbet, CloudBet, Rollbit, Vave, Betfury | Duelbits |
+| Slovak / Czech | **Tipsport.cz**, **Chance.cz**, iFortuna CZ, eFortuna PL, Synottip (country not shown) | Nike, DOXXbet, Tipos, MONACObet; **no `.sk` versions of Tipsport, Chance or Fortuna** |
+| Sharp / exchange | SingBet, Betfair (several) | Pinnacle |
+
+Consequences: Roobet, Stake and MyStake are on the list (so they exist as options); Slovak legs stay on the direct feeds (the Czech
+sites cannot be bet on with a Slovak account). Still unverified: that Roobet/Stake can be selected on the Solo plan, and the quality/freshness of their prices.
+Compared with OddsPapi (720 bookmakers, includes Pinnacle, same three crypto books, no Tipsport/Chance): both cover the three target books;
+the choice is price, reliability (OddsPapi's login errored intermittently) and request limits.
+
 ## Cost outlook
 
 | Goal | Realistic option |
