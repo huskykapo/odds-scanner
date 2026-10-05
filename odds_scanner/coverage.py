@@ -118,6 +118,30 @@ def _classify_status_base(status: int) -> tuple[str, str]:
     return "ERROR", f"HTTP {status}"
 
 
+def _get_retrying(
+    session: Any, url: str, params: dict[str, Any], sleep: Callable[[float], None], *, retries: int = 2, pause: float = 5.0,
+) -> tuple[Any, str, int]:
+    """GET with a couple of polite retries for transient failures (network error or HTTP 5xx).
+
+    Returns (response or None, problem text if no response, requests actually sent). 4xx answers are
+    never retried: they are answers (bad key, quota), not hiccups. Each retry may count against a
+    metered quota, so there are only ``retries`` of them and they are spaced ``pause`` seconds apart.
+    """
+    problem, response = "", None
+    for attempt in range(retries + 1):
+        if attempt:
+            sleep(pause * attempt)
+        try:
+            response = session.get(url, params=params, timeout=TIMEOUT)
+        except requests.RequestException as exc:
+            response, problem = None, f"no HTTP answer ({type(exc).__name__})"
+            continue
+        problem = ""
+        if response.status_code < 500:
+            return response, "", attempt + 1
+    return response, problem, retries + 1
+
+
 # ---------------------------------------------------------------------- OddsPapi
 ODDSPAPI_URL = "https://api.oddspapi.io/v4/bookmakers"
 
@@ -132,12 +156,13 @@ def check_oddspapi(
     if not key:
         return _no_key(title, source, "ODDSPAPI_API_KEY", "https://oddspapi.io")
     session = session or new_session()
-    try:
-        response = session.get(ODDSPAPI_URL, params={"apiKey": key}, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        return _failure(title, source, "UNREACHABLE", "n/a", f"no HTTP answer ({type(exc).__name__}); says nothing about the service")
+    response, problem, attempts = _get_retrying(session, ODDSPAPI_URL, {"apiKey": key}, sleep)
+    if response is None:
+        return _failure(title, source, "UNREACHABLE", "n/a", f"{problem}; says nothing about the service (tried {attempts} times)")
     if response.status_code != 200:
         status, error = _classify_status(response.status_code, _snippet(response, key))
+        if attempts > 1:
+            error += f" (tried {attempts} times)"
         return _failure(title, source, status, str(response.status_code), error)
     try:
         data = response.json()
@@ -145,7 +170,7 @@ def check_oddspapi(
         return _failure(title, source, "ERROR", "200", "the answer was not JSON")
     names = bookmaker_names(data)
     extra: list[str] = []
-    requests_sent = 1
+    requests_sent = attempts
     if save_dir:
         extra, used = sample_oddspapi(save_dir, key=key, session=session, names=names, sleep=sleep, today=today)
         requests_sent += used
@@ -194,13 +219,13 @@ def sample_oddspapi(
     def get(url: str, params: dict[str, Any]) -> Any:
         nonlocal sent
         sleep(MIN_INTERVAL)  # also before the first one: the bookmaker-list request just went out
-        sent += 1
-        try:
-            response = session.get(url, params={**params, "apiKey": key}, timeout=TIMEOUT)
-        except requests.RequestException as exc:
-            raise _SampleError(f"no HTTP answer ({type(exc).__name__})") from None
+        response, problem, attempts = _get_retrying(session, url, {**params, "apiKey": key}, sleep)
+        sent += attempts
+        if response is None:
+            raise _SampleError(problem)
         if response.status_code != 200:
-            raise _SampleError(f"HTTP {response.status_code}")
+            detail = _snippet(response, key)
+            raise _SampleError(f"HTTP {response.status_code}" + (f" - service says: {detail}" if detail else ""))
         try:
             return response.json()
         except ValueError:

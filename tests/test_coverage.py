@@ -62,15 +62,35 @@ def test_oddspapi_reports_found_and_missing_bookmakers_without_printing_the_key(
     assert s.calls[0][1] == {"apiKey": KEY}  # sent to the service, never shown
 
 
+NOSLEEP = lambda x: None  # noqa: E731
+
+
 def test_oddspapi_errors_never_leak_the_key():
     leaky = requests.ConnectionError(f"failed: https://api.oddspapi.io/v4/bookmakers?apiKey={KEY}")
-    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(leaky))
-    assert r.status == "UNREACHABLE" and KEY not in render(r) and "ConnectionError" in r.error
-    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(401, text="no", ctype="text/html")))
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(leaky, leaky, leaky), sleep=NOSLEEP)
+    assert r.status == "UNREACHABLE" and KEY not in render(r) and "ConnectionError" in r.error and "tried 3 times" in r.error
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(401, text="no", ctype="text/html")), sleep=NOSLEEP)
     assert r.status == "AUTH_FAILED" and KEY not in render(r)
-    assert c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(429, text="x", ctype="text/html"))).status == "RATE_LIMITED"
-    assert c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(500, text="x", ctype="text/html"))).status == "ERROR"
-    assert c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(200, text="<html>", ctype="text/html"))).status == "ERROR"
+    assert c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(429, text="x", ctype="text/html")), sleep=NOSLEEP).status == "RATE_LIMITED"
+    five = lambda: Resp(500, text="x", ctype="text/html")  # noqa: E731
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(five(), five(), five()), sleep=NOSLEEP)
+    assert r.status == "ERROR" and "HTTP 500" in r.error and "tried 3 times" in r.error
+    assert c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(Resp(200, text="<html>", ctype="text/html")), sleep=NOSLEEP).status == "ERROR"
+
+
+def test_transient_failures_are_retried_politely_and_4xx_never():
+    sleeps = []
+    s = Session(Resp(500, text="x", ctype="text/html"), requests.ConnectionError("x"), LIST)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, sleep=sleeps.append)
+    assert r.status == "OK" and len(s.calls) == 3 and sleeps == [5.0, 10.0]  # two retries, spaced out
+    assert "(requests sent: 3)" in render(r)
+    s = Session(Resp(401, text="x", ctype="text/html"))
+    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, sleep=sleeps.append)
+    assert len(s.calls) == 1  # an answer, not a hiccup: no retry
+    five = Resp(500, text="x", ctype="text/html")
+    s = Session(five, five, five, five)
+    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, sleep=NOSLEEP)
+    assert len(s.calls) == 3  # never more than 2 retries
 
 
 # ------------------------------------------------------------------ SportMonks (paginated)
@@ -154,10 +174,10 @@ def test_sample_fetches_one_fixture_saves_files_and_reports_per_bookmaker(tmp_pa
 
 def test_sample_is_skipped_without_save_dir_and_errors_are_reported_without_the_key(tmp_path):
     s = Session(LIST)
-    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s)
+    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, sleep=lambda x: None)
     assert len(s.calls) == 1  # no --save -> only the free list request
     leaky = requests.ConnectionError(f"https://api.oddspapi.io/v4/fixtures?apiKey={KEY}")
-    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, leaky), save_dir=tmp_path, sleep=lambda x: None)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, leaky, leaky, leaky), save_dir=tmp_path, sleep=lambda x: None)
     assert "sample failed: no HTTP answer (ConnectionError)" in render(r) and KEY not in render(r)
     r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, FIXTURES, Resp(429, text="x", ctype="text/html")), save_dir=tmp_path, sleep=lambda x: None)
     assert "sample failed: HTTP 429" in render(r)
@@ -205,12 +225,27 @@ def test_oddsapiio_no_key_found_and_errors(monkeypatch):
 
 
 def test_the_services_own_error_message_is_shown_with_the_key_removed():
-    msg = Resp(500, text=f'{{"error": "Internal error for key {KEY}, try again"}}', ctype="application/json")
-    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(msg))
+    def msg():
+        return Resp(500, text=f'{{"error": "Internal error for key {KEY}, try again"}}', ctype="application/json")
+
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(msg(), msg(), msg()), sleep=NOSLEEP)
     assert r.status == "ERROR" and "service says:" in r.error and "Internal error" in r.error
     assert KEY not in render(r) and "***" in r.error
-    html = Resp(500, text="<html><body>Bad gateway</body></html>", ctype="text/html")
-    assert "service says" not in c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(html)).error  # HTML pages are not echoed
+
+    def page():
+        return Resp(500, text="<html><body>Bad gateway</body></html>", ctype="text/html")
+
+    assert "service says" not in c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(page(), page(), page()), sleep=NOSLEEP).error
+
+
+def test_sample_retries_a_transient_500_and_reports_the_service_message(tmp_path):
+    sleeps = []
+    s = Session(LIST, Resp(500, text="x", ctype="text/html"), FIXTURES, ODDS)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=sleeps.append, today=date(2026, 10, 5))
+    assert "(requests sent: 4)" in render(r) and "odds returned" in render(r)
+    bad = lambda: Resp(403, text='{"message": "plan does not include this endpoint"}', ctype="application/json")  # noqa: E731
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, bad()), save_dir=tmp_path, sleep=NOSLEEP)
+    assert "sample failed: HTTP 403 - service says: " in render(r) and "plan does not include" in render(r)
 
 
 def test_all_target_includes_no_aggregator_and_names_are_listed():
