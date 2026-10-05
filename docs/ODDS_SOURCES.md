@@ -219,18 +219,32 @@ sites cannot be bet on with a Slovak account). Still unverified: that Roobet/Sta
 Compared with OddsPapi (720 bookmakers, includes Pinnacle, same three crypto books, no Tipsport/Chance): both cover the three target books;
 the choice is price, reliability (OddsPapi's login errored intermittently) and request limits.
 
-### Is there ONE feed with both Slovak `.sk` and crypto books? (web research 2026-10-05, advertised only, NOT tested)
+### Is there ONE feed with both Slovak `.sk` and crypto books? (web research 2026-10-05; from search results, betburger.com itself is blocked from the build sandbox, so NOT opened or tested)
 
-| Provider | Slovak | Crypto | Notes |
+**Betburger is the first lead that lists both groups.** Per its own pages (via search snippets):
+
+| Group | Listed on Betburger |
+|---|---|
+| Slovak | TipsportSK, ChanceSK (+ChanceCZ), Tipos, Synottip/SynottipSK, Nike.sk (prematch only), iFortuna.sk (prematch only, domain gm.ifortuna.sk) |
+| Crypto | Stake (id 188), Roobet, Mystake / Mystake.bet |
+| Not found | DOXXbet, MONACObet (no mention found) |
+
+API: JSON feed of **ready-made surebets/valuebets** (not raw odds per book), prematch and live, up to 1800 results/min, up to 30 results per request,
+Swagger docs (prematch rest-api-pr.betburger.com/doc.html). Access is included with a Prematch/Live subscription; the API page also says you
+apply with a list of up to 10 bookmakers and get a cost calculation (the two descriptions don't obviously agree - ask support).
+Prices quoted by review sites: Prematch EUR 79.99/month (24.99 for 7 days), Live 279.99, bundle 319.99; free tier has up to 60 s delay and 1% max ROI.
+Reported accuracy (third-party review): prematch median odds-update time 37.5 s, live 3.1 s.
+
+Caveats: (1) it gives arbs, not odds, so our own matching/validation/near-miss logic would not run on it (it could still be used as a second
+opinion next to our direct Slovak feeds); (2) 37 s median prematch freshness is slower than our direct feeds; (3) pricing, API terms and the
+10-bookmaker limit are unconfirmed until asked directly; (4) the free tier is useless for this (delay + 1% cap).
+
+| Other provider | Slovak | Crypto | Notes |
 |---|---|---|---|
-| Betburger (arb-scanner service) | Nike.sk, iFortuna.sk (prematch) | unconfirmed | 140+ books; Tipsport.sk, Tipos, Stake, Roobet not confirmed; API access/price unconfirmed |
-| Oddsmarket | unconfirmed | unconfirmed | 150-300+ books, WebSocket ~1 s; no public price found |
+| Oddsmarket | unconfirmed | unconfirmed | no public price/book list found |
 | SportMonks Premium Odds | Tipsport-SK, iFortuna | none | about EUR 129/month |
 | OddsPapi / Odds-API.io | none (CZ only on Odds-API.io) | Roobet, Stake, MyStake | tested above |
 | LSports / Sportradar / BetsAPI | nothing specific found | nothing specific found | enterprise-priced |
-
-Conclusion: no single feed is verified to carry both groups. Practical setup: the direct Slovak feeds (free) + one crypto feed.
-The only lead for a combined feed is Betburger; check its bookmaker list and API price before considering it.
 
 ## Cost outlook
 
