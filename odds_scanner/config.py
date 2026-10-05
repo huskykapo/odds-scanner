@@ -194,6 +194,35 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
+class AdaptivePollingConfig:
+    """Poll a bookmaker faster when a match there starts soon, slower when nothing starts for a day."""
+
+    enabled: bool = True
+    soon_hours: float = 3.0  # a match starts within this -> faster
+    soon_factor: float = 0.5  # ...polling every (configured interval x this)
+    far_hours: float = 24.0  # nothing starts within this -> slower
+    far_factor: float = 2.0
+    min_interval_seconds: float = 30.0  # never faster than this (the 1 request/s per site rule still applies)
+    max_interval_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ConfigError("adaptive_polling.enabled must be true or false")
+        _positive("adaptive_polling.soon_hours", self.soon_hours)
+        _positive("adaptive_polling.far_hours", self.far_hours)
+        _positive("adaptive_polling.min_interval_seconds", self.min_interval_seconds)
+        _positive("adaptive_polling.max_interval_seconds", self.max_interval_seconds)
+        if not (isinstance(self.soon_factor, (int, float)) and 0 < self.soon_factor <= 1):
+            raise ConfigError("adaptive_polling.soon_factor must be between 0 (exclusive) and 1")
+        if not (isinstance(self.far_factor, (int, float)) and self.far_factor >= 1):
+            raise ConfigError("adaptive_polling.far_factor must be 1 or more")
+        if self.soon_hours >= self.far_hours:
+            raise ConfigError("adaptive_polling.soon_hours must be smaller than far_hours")
+        if self.min_interval_seconds > self.max_interval_seconds:
+            raise ConfigError("adaptive_polling.min_interval_seconds must not exceed max_interval_seconds")
+
+
+@dataclass(frozen=True)
 class NotificationConfig:
     console: bool = True
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
@@ -264,6 +293,7 @@ class Config:
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     details: DetailsConfig = field(default_factory=DetailsConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
+    adaptive_polling: AdaptivePollingConfig = field(default_factory=AdaptivePollingConfig)
 
     def __post_init__(self) -> None:
         for name in ("sports", "regions", "markets"):
@@ -353,6 +383,7 @@ def config_from_dict(data: Mapping[str, Any] | None) -> Config:
             "dashboard": lambda v: _build(DashboardConfig, v, "dashboard"),
             "details": lambda v: _build(DetailsConfig, v, "details"),
             "validation": lambda v: _build(ValidationConfig, v, "validation"),
+            "adaptive_polling": lambda v: _build(AdaptivePollingConfig, v, "adaptive_polling"),
             "notifications": lambda v: _build(
                 NotificationConfig,
                 v,

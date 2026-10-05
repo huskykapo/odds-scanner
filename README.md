@@ -338,6 +338,25 @@ Telegram alerts carry the event, market, ROI, bankroll, each bookmaker with the 
 the guaranteed return and profit, odds age, confidence and (if `notifications.dashboard_url` is set) an
 **OPEN DASHBOARD** link.
 
+### Polling speed (adaptive polling) and `stats`
+
+Each bookmaker is polled in its own thread. With `adaptive_polling` on (default) the wait after a
+successful poll depends on that bookmaker's *next kick-off*: a match within `soon_hours` (3) -> poll
+twice as often (`soon_factor` 0.5, never faster than `min_interval_seconds`, 30 s); nothing within
+`far_hours` (24) -> half as often (`far_factor` 2.0, at most `max_interval_seconds`, 300 s); otherwise the
+configured `poll_interval_seconds`. A faster tier is never slower than your configured interval and
+a slower tier never faster. Failing polls keep their exponential backoff, and the HTTP client never
+sends more than one request per second to a site, whatever you configure.
+
+**Want more updates overall?** Lower `poll_interval_seconds` for a bookmaker under `providers:` (e.g. 30), or
+shrink `adaptive_polling.min_interval_seconds`. Watch the *Providers* table: if a site starts answering
+errors or 403, the scanner backs off / stops polling it, and going faster only makes that more likely.
+MONACObet's whole-sport football feed is ~5 MB per poll: restrict it with `options.league_ids` before
+polling it faster.
+
+`py start.py stats` reads your own arb log and shows how long before kick-off arbs were found (with
+average ROI) and which bookmaker pairs produced them: use it to decide where extra polling pays off.
+
 ### Telegram alerts
 
 The easy way: run `py start.py telegram-test` (or `python -m odds_scanner telegram-test`) and follow

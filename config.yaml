@@ -101,6 +101,16 @@ dashboard:
   highlight_seconds: 120
   open_browser: true   # open the dashboard in your browser when the scanner starts
 
+# ---- adaptive polling: poll more often when a match is about to start, less when nothing is -------
+adaptive_polling:
+  enabled: true
+  soon_hours: 3            # a match starts within this many hours -> faster polling
+  soon_factor: 0.5         # ...every (the bookmaker's poll_interval_seconds x 0.5)
+  far_hours: 24            # nothing starts within this many hours -> slower polling
+  far_factor: 2.0
+  min_interval_seconds: 30 # never faster than this (and never more than 1 request/s per site)
+  max_interval_seconds: 300
+
 # ---- validation: an arb is only announced after these checks pass --------------------------------
 validation:
   max_odds_age_seconds: 180        # every leg's price must be at most this old

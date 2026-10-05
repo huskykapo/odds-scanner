@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Sequence
 
+from odds_scanner.adaptive import AdaptiveSettings, adaptive_interval, soonest_start
 from odds_scanner.arbitrage import FinderSettings, analyze_events
 from odds_scanner.errors import (
     AuthenticationError,
@@ -59,6 +60,7 @@ class Source:
     fetch_kwargs: dict[str, Any] = field(default_factory=dict)  # regions/markets for The Odds API
     quota_floor: int | None = None  # stop below this many remaining requests (The Odds API)
     note: str = ""  # shown on the dashboard instead of the "not configured" note (sport id lookup)
+    current_interval: float | None = None  # what adaptive polling chose last (None = the configured interval)
 
 
 @dataclass
@@ -109,6 +111,7 @@ class LiveEngine:
         near_miss_limit: int = 50,
         detail_settings: DetailSettings | None = None,
         validation: ValidationSettings | None = None,
+        adaptive: AdaptiveSettings | None = None,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self.sources = list(sources)
@@ -129,6 +132,7 @@ class LiveEngine:
         self._near_floor = near_miss_floor or None  # 0 / None = do not compute near misses
         self._near_limit = near_miss_limit
         self.near_misses: list[NearMiss] = []
+        self._adaptive = adaptive or AdaptiveSettings(enabled=False)  # off unless configured
         self.registry = OpportunityRegistry(validation or ValidationSettings(), settings)
         self._generations: dict[str, int] = {src.key: 0 for src in self.sources}  # successful polls per provider
         self.arbs: list[Arbitrage] = []  # current candidates, enriched with status/confidence
@@ -193,12 +197,23 @@ class LiveEngine:
             with self._lock:
                 self._generations[source.key] += 1
             state.status, state.failures, state.last_update = "ok", 0, self._clock()
+            delay = self._next_interval(source)
         else:
             state.status = "error"
             state.failures += 1
             delay = min(delay * 2 ** min(state.failures, 4), max(MAX_BACKOFF_SECONDS, delay))
         self._changed.set()
         return delay
+
+    def _next_interval(self, source: Source) -> float:
+        """Delay after a successful poll: shorter when this bookmaker has a match starting soon."""
+        now = self._clock()
+        with self._lock:
+            starts = [e.commence_time for sp in source.sports for e in self._snapshots.get((source.key, sp), ())]
+        seconds, reason = adaptive_interval(source.poll_interval, soonest_start(starts, now), self._adaptive)
+        source.current_interval = seconds
+        log.debug("%s: next poll in %.0fs (%s)", source.title, seconds, reason)
+        return seconds
 
     def _finish(self, state: ProviderState, status: str, message: str, source: Source) -> None:
         state.status, state.message = status, message
@@ -570,7 +585,7 @@ class LiveEngine:
             "bankroll": rules.bankroll,
             "min_profit": rules.min_profit_percent,
             **self._dash,
-            "providers": [self.states[s.key].as_dict(s.poll_interval, s.homepage) for s in self.sources],
+            "providers": [self.states[s.key].as_dict(s.current_interval or s.poll_interval, s.homepage) for s in self.sources],
             "matching": stats.as_dict(),
             "arbs": out_arbs,
         }
