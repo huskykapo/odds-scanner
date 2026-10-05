@@ -17,6 +17,7 @@ stale_after_seconds: 300    # ignore prices fetched longer ago than this
 
 # ---- odds sources --------------------------------------------------------------------------
 # Every provider runs in its own thread. Common settings per provider:
+#   active_hours (e.g. "08:00-23:00" local time: no polling outside it - saves metered API requests overnight),
 #   enabled, poll_interval_seconds, timeout_seconds, max_retries, retry_backoff_seconds,
 #   min_request_interval_seconds (>= 1: never more than one request per second per site),
 #   sports (overrides the list above), options (provider specific, see below).

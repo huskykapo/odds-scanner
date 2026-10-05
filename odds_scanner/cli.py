@@ -88,6 +88,12 @@ def build_logs(cfg: Config) -> list[ArbLog]:
     return logs
 
 
+def _window(text: str | None):
+    from odds_scanner.schedule import parse_window
+
+    return parse_window(text) if text else None
+
+
 def build_sources(cfg: Config) -> list[Source]:
     """One :class:`Source` per enabled entry under ``providers:``."""
     sources: list[Source] = []
@@ -104,7 +110,7 @@ def build_sources(cfg: Config) -> list[Source]:
             sources.append(Source(
                 name, "The Odds API", provider, sports, sc.poll_interval_seconds,
                 fetch_kwargs={"regions": cfg.regions, "markets": cfg.markets, "bookmakers": cfg.bookmakers},
-                quota_floor=cfg.quota.stop_below,
+                quota_floor=cfg.quota.stop_below, active_hours=_window(sc.active_hours),
             ))
             continue
         cls = SK_PROVIDERS[name]
@@ -120,7 +126,8 @@ def build_sources(cfg: Config) -> list[Source]:
         skipped = [s for s in sports if not sk.supports(s)]
         if skipped:
             log.info("%s: no site id known yet for %s", cls.title, ", ".join(skipped))
-        sources.append(Source(name, cls.title, sk, supported, sc.poll_interval_seconds, homepage=cls.homepage, skipped_sports=skipped))
+        sources.append(Source(name, cls.title, sk, supported, sc.poll_interval_seconds, homepage=cls.homepage,
+                              skipped_sports=skipped, active_hours=_window(sc.active_hours)))
     return sources
 
 

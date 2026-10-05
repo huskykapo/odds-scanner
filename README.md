@@ -354,6 +354,12 @@ errors or 403, the scanner backs off / stops polling it, and going faster only m
 MONACObet's whole-sport football feed is ~5 MB per poll: restrict it with `options.league_ids` before
 polling it faster.
 
+**Daytime only (`active_hours`).** Under `providers:` any source can have `active_hours: "08:00-23:00"` (local time
+of the machine running the scanner; windows that cross midnight such as `"22:00-06:00"` work too). Outside the window
+that source is not polled at all (the Providers table shows *sleeping* and when it resumes), which saves metered API
+requests overnight. Prices from a sleeping source go stale within `stale_after_seconds` and are ignored, so
+the scanner never alerts on them.
+
 `py start.py stats` reads your own arb log and shows how long before kick-off arbs were found (with
 average ROI) and which bookmaker pairs produced them: use it to decide where extra polling pays off.
 

@@ -65,8 +65,16 @@ class SourceConfig:
     min_request_interval_seconds: float = 1.0  # per site; values below 1 are refused
     sports: tuple[str, ...] | None = None  # None = the top-level ``sports`` list
     options: Mapping[str, Any] = field(default_factory=dict)  # provider-specific, see config.yaml
+    active_hours: str | None = None  # e.g. "08:00-23:00" local time: no polling outside it (saves metered API requests)
 
     def __post_init__(self) -> None:
+        if self.active_hours is not None:
+            from odds_scanner.schedule import parse_window
+
+            try:
+                parse_window(self.active_hours)
+            except ValueError as exc:
+                raise ConfigError(f"providers.*.active_hours: {exc}") from exc
         if self.options is None:
             object.__setattr__(self, "options", {})
         if not isinstance(self.enabled, bool):

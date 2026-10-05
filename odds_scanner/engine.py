@@ -28,6 +28,7 @@ from odds_scanner.markets import market_title, outcome_title, sport_family
 from odds_scanner.matching import MatchSettings, MatchStats, match_events
 from odds_scanner.models import Arbitrage, Event, MarketOdds, NearMiss
 from odds_scanner.notifiers.base import Notifier
+from odds_scanner.schedule import Window
 from odds_scanner.opportunities import GONE, VERIFIED, Opportunity, OpportunityRegistry, ValidationSettings
 from odds_scanner.notifiers.dedupe import DedupeCache
 from odds_scanner.providers.base import OddsProvider
@@ -61,6 +62,7 @@ class Source:
     quota_floor: int | None = None  # stop below this many remaining requests (The Odds API)
     note: str = ""  # shown on the dashboard instead of the "not configured" note (sport id lookup)
     current_interval: float | None = None  # what adaptive polling chose last (None = the configured interval)
+    active_hours: Window | None = None  # poll only inside this local-time window (None = around the clock)
 
 
 @dataclass
@@ -112,6 +114,7 @@ class LiveEngine:
         detail_settings: DetailSettings | None = None,
         validation: ValidationSettings | None = None,
         adaptive: AdaptiveSettings | None = None,
+        local_now: Callable[[datetime], datetime] = lambda d: d.astimezone(),
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self.sources = list(sources)
@@ -133,6 +136,7 @@ class LiveEngine:
         self._near_limit = near_miss_limit
         self.near_misses: list[NearMiss] = []
         self._adaptive = adaptive or AdaptiveSettings(enabled=False)  # off unless configured
+        self._local_now = local_now  # UTC -> the machine's local time, for active hours
         self.registry = OpportunityRegistry(validation or ValidationSettings(), settings)
         self._generations: dict[str, int] = {src.key: 0 for src in self.sources}  # successful polls per provider
         self.arbs: list[Arbitrage] = []  # current candidates, enriched with status/confidence
@@ -659,8 +663,27 @@ class LiveEngine:
         t.start()
         self._threads.append(t)
 
+    MAX_SLEEP = 300.0  # while outside active hours, re-check the clock at least this often
+
+    def _sleep_until_active(self, source: Source) -> bool:
+        """True if a poll may happen now. Outside the source's active hours: say so and wait."""
+        window = source.active_hours
+        if window is None:
+            return True
+        wait = window.seconds_until_open(self._local_now(self._clock()))
+        if wait <= 0:
+            return True
+        state = self.states[source.key]
+        if state.status not in ("blocked", "stopped"):
+            state.status, state.message = "sleeping", f"paused outside active hours ({window}); resumes in {wait / 3600:.1f} h"
+            self._changed.set()
+        self._stop.wait(min(wait, self.MAX_SLEEP))
+        return False
+
     def _provider_loop(self, source: Source) -> None:
         while not self._stop.is_set():
+            if not self._sleep_until_active(source):
+                continue
             delay = self.poll(source)
             if delay is None:
                 return
