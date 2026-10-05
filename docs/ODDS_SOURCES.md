@@ -181,6 +181,20 @@ be the two bookmakers of a 2-bookmaker plan (Odds-API.io) or fit the free slot.
 
 `py start.py diagnostics oddsapiio` (key in `ODDSAPIIO_API_KEY`) lists what an Odds-API.io key can use.
 
+### One feed for BOTH Slovak and crypto books? (research 2026-10-05; advertised, NOT tested)
+
+| Provider | Slovak/Czech books claimed | Crypto books claimed | Verdict |
+|---|---|---|---|
+| **Odds-API.io** | lists **Chance.cz, iFortuna CZ, Tipsport.cz** (Czech versions) | lists **MyStake, Roobet, Stake** | the only provider found that claims both groups; the Czech sites cannot be bet on with a Slovak account, and whether `.sk` versions exist is unverified |
+| OddsPapi | **tested:** Tipsport, Chance, Synot not in the owner's 720-book list; Fortuna only PL/RO | Roobet, Stake, MyStake (tested: listed) | crypto only |
+| SportMonks (Premium Odds, ~EUR 129/month) | lists **Tipsport-SK** and iFortuna; Czech variants not covered | none (mainstream books) | Slovak only, pricey |
+| OpticOdds | not found | Stake | enterprise pricing |
+| PulseScore | Tipsport (Czech) | n/a | Czech only |
+
+So no single provider is *verified* to carry the Slovak `.sk` versions of Tipsport/Chance/Fortuna together with Stake/Roobet/MyStake.
+Practical combination: keep the five direct Slovak sources (working), add Odds-API.io for the crypto books, and test
+whether its list contains `.sk` versions: `py start.py diagnostics oddsapiio` (key in `ODDSAPIIO_API_KEY`).
+
 ## Cost outlook
 
 | Goal | Realistic option |
