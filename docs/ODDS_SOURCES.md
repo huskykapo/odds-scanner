@@ -22,7 +22,7 @@ Last documentation update: 2026-10-05.
 | Bookmaker | Status | Source | Public? | Free |
 |---|---|---|---|---|
 | MONACObet, DOXXbet, Niké, Tipos, Synot tip | **WORKING** (tested by the project owner on 2026-10-04/05) | the site's own public JSON endpoints | yes, anonymous | yes |
-| Tipsport SK | **UNVERIFIED / likely BLOCKED** | public `/rest/offer/...` (research lead) | earlier manual check: 403 bot-check | n/a |
+| Tipsport SK | **BLOCKED** (tested 2026-10-05) | public `/rest/offer/...` (research lead) | no: the home page itself returns a 403 bot-check | n/a |
 | Chance SK | **UNVERIFIED / likely BLOCKED** | same platform as Tipsport (lead) | earlier manual check: 403 bot-check | n/a |
 | Roobet | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no official API found | free tiers unlikely to include it |
 | Stake | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no public odds API | free tiers unlikely to include it |
@@ -54,10 +54,10 @@ Source of the endpoint details and sample responses: `sample_data/sk/README.md`.
 | Source | Public site `https://www.tipsport.sk`, REST paths `/rest/offer/v4/sports`, `/rest/offer/v2/offer`, `/rest/offer/v2/search`, `/rest/offer/v3/sports/COMPETITION/{id}/matches`, `/rest/offer/v3/matches/{id}/communityStats` (**leads from an older open-source client; not assumed to still work**) |
 | Public vs authenticated | unknown. Earlier manual check on 2026-10-04 (`sample_data/sk/README.md`): `POST /rest/offer/v2/offer?limit=75` -> **403 bot-check page**, tested from inside a browser with cookies omitted |
 | Pre-match / live | unknown (not testable until the endpoint is reachable) |
-| Tested by diagnostics | **not yet from a machine that can reach the site.** The build sandbox's proxy refused the connection, which the tool reports as `INCONCLUSIVE` (not a bookmaker verdict) |
+| Tested by diagnostics | **2026-10-05, from the project owner's own PC and connection: `BLOCKED`.** 1 request (`GET https://www.tipsport.sk/`, honest User-Agent): HTTP 403, `text/html`, 74029 bytes, a captcha/bot-check page; the site set 1 cookie. The probe stopped at once: no endpoint was tried, nothing retried, no workaround attempted. Matches the earlier manual check of 2026-10-04 |
 | Polling plan if it works | pre-match 60-120 s, 1 request/s ceiling |
-| Known restrictions | if the diagnostic returns BLOCKED the approach stops here. No cookie reuse, header tricks, headless-browser evasion or retries |
-| Fallback | an odds aggregator that licenses Tipsport data (not yet researched), or skip |
+| Known restrictions | **The site refuses automated clients at the home page.** Per project rules this approach ends here: no cookie reuse, header or User-Agent tricks, headless-browser evasion, proxies or retries. No adapter will be built for this source |
+| Fallback | an odds aggregator that licenses Tipsport data (not yet researched), or leave Tipsport out |
 
 **What the older open-source client documents** (`stepankarlovec/tipsport`, tipsport.cz, PHP; read 2026-10-05):
 GET the home page and read the site's own `JSESSIONID` cookie, then call `GET /rest/offer/v4/sports` (tree in
@@ -71,8 +71,8 @@ fromResults=false`, `GET /rest/offer/v3/matches/{id}/communityStats?...`. It set
 `py start.py diagnostics tipsport --save tipsport_samples` stores the public JSON bodies of the working probes
 (never cookies/headers); the adapter is then written and tested against that real data.
 
-**Next action:** run `py start.py diagnostics tipsport --save tipsport_samples` on the scanner machine and send
-the output (and the saved files, if any). An adapter is built only if it reports WORKING or PARTIAL.
+**Outcome:** BLOCKED on 2026-10-05, so no adapter is built. Re-run `py start.py diagnostics tipsport` occasionally; only a
+normal, anonymous 200 response would reopen this.
 
 ## Chance SK  (priority 2)
 
@@ -119,4 +119,4 @@ class with Tipsport only if the structures really are the same) only if a public
 | Continuous scanning of an aggregator | a plan with at least ~1 request per 30-60 s per sport, or WebSocket streaming |
 
 ## Changelog
-- 2026-10-05: initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.
+- 2026-10-05: Tipsport SK tested from the owner's PC: BLOCKED (403 bot-check at the home page). Initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.
