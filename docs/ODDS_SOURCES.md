@@ -1,0 +1,110 @@
+# Odds sources
+
+Read-only odds collection. The scanner never logs in, never places or prepares a bet, and never
+bypasses CAPTCHA, Cloudflare/WAF, rate limits, geo-restrictions or authentication. A 401/403/challenge
+stops that approach for that bookmaker; it is documented here, not worked around.
+
+**How to read the "tested" column.** *Tested* = observed by us with a real request. *Advertised* =
+a vendor's own marketing or a search summary; **not verified**. This document was written in a build
+environment whose network proxy refuses connections to bookmaker and odds-API hosts, so live
+verification has to be done on the machine that runs the scanner:
+
+```
+py start.py diagnostics all          # or:  diagnostics tipsport | chance | roobet | stake | nike | ...
+```
+
+Last documentation update: 2026-10-05.
+
+---
+
+## Summary
+
+| Bookmaker | Status | Source | Public? | Free |
+|---|---|---|---|---|
+| MONACObet, DOXXbet, Niké, Tipos, Synot tip | **WORKING** (tested by the project owner on 2026-10-04/05) | the site's own public JSON endpoints | yes, anonymous | yes |
+| Tipsport SK | **UNVERIFIED / likely BLOCKED** | public `/rest/offer/...` (research lead) | earlier manual check: 403 bot-check | n/a |
+| Chance SK | **UNVERIFIED / likely BLOCKED** | same platform as Tipsport (lead) | earlier manual check: 403 bot-check | n/a |
+| Roobet | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no official API found | free tiers unlikely to include it |
+| Stake | **NO SOURCE SELECTED** | third-party aggregator (advertised) | no public odds API | free tiers unlikely to include it |
+
+---
+
+## The five working Slovak bookmakers
+
+| | MONACObet | DOXXbet | Niké | Tipos | Synot tip |
+|---|---|---|---|---|---|
+| Endpoint | `ibet-monaco.dualsoft.bet/restapi/offer/sk/sport/<S/H/B/T>/mob` | `www.doxxbet.sk/offer/GetOfferList` (POST) | `www.nike.sk/api-gw/nikeone/v1/boxes/search/portal` | `tipkurz.etipos.sk/.../GetWebStandardEvents` (POST, protobuf in JSON) | same platform as Tipos on `sport.synottip.sk` |
+| Auth | none | none | none | none (any 32-hex token) | same as Tipos |
+| Pre-match / live | pre-match | pre-match | pre-match (live filtered out) | pre-match | pre-match |
+| Markets | 1X2 / winner, double chance, totals, extras from match pages | same | same | 1X2, double chance | same |
+| Poll interval (default) | 120 s (whole-sport feed ~5 MB) | 60 s | 60 s | 60 s | 60 s |
+| Limits | our client: max 1 request/s per host, backoff on 429/5xx | same | same | same | same |
+| Betradar match id | yes | yes | no | yes | yes |
+| Risk | undocumented endpoints can change or start blocking at any time; site terms may restrict automated access | | | | |
+| Fallback | The Odds API provider (in the code, off by default) or an aggregator | | | | |
+
+Source of the endpoint details and sample responses: `sample_data/sk/README.md`.
+
+---
+
+## Tipsport SK  (priority 1)
+
+| | |
+|---|---|
+| Source | Public site `https://www.tipsport.sk`, REST paths `/rest/offer/v4/sports`, `/rest/offer/v2/offer`, `/rest/offer/v2/search`, `/rest/offer/v3/sports/COMPETITION/{id}/matches`, `/rest/offer/v3/matches/{id}/communityStats` (**leads from an older open-source client; not assumed to still work**) |
+| Public vs authenticated | unknown. Earlier manual check on 2026-10-04 (`sample_data/sk/README.md`): `POST /rest/offer/v2/offer?limit=75` -> **403 bot-check page**, tested from inside a browser with cookies omitted |
+| Pre-match / live | unknown (not testable until the endpoint is reachable) |
+| Tested by diagnostics | **not yet from a machine that can reach the site.** The build sandbox's proxy refused the connection, which the tool reports as `INCONCLUSIVE` (not a bookmaker verdict) |
+| Polling plan if it works | pre-match 60-120 s, 1 request/s ceiling |
+| Known restrictions | if the diagnostic returns BLOCKED the approach stops here. No cookie reuse, header tricks, headless-browser evasion or retries |
+| Fallback | an odds aggregator that licenses Tipsport data (not yet researched), or skip |
+
+**Next action:** run `py start.py diagnostics tipsport` on the scanner machine and send the output.
+An adapter is built only if it reports WORKING or PARTIAL with a normal public JSON endpoint.
+
+## Chance SK  (priority 2)
+
+Same as Tipsport (group sibling, `https://www.chance.sk`). Earlier manual check: 403 bot-check page.
+The same platform is a *lead*, not proof: ids, JSON shape and market codes must be verified
+separately. Run `py start.py diagnostics chance`. A dedicated adapter will be written (sharing a base
+class with Tipsport only if the structures really are the same) only if a public endpoint works.
+
+---
+
+## Roobet  (priority 3)
+
+| | |
+|---|---|
+| Official API | none found. No developer portal or documented odds API turned up in research on 2026-10-05 |
+| Candidate sources | third-party odds aggregators, e.g. OddsPapi, Odds-API.io, others |
+| What is **advertised** (not verified) | OddsPapi's own site/blog lists Roobet among "crypto and offshore books" under "350+ bookmakers". A second search summary of the same vendor said Roobet coverage was *not confirmed*. **Conflicting; unresolved** |
+| Free tiers (advertised) | OddsPapi: 250 requests/month (~8/day), paid from ~$49/month, WebSocket on paid tiers. Odds-API.io: free plan = 2 "recreational" bookmakers, 100 requests/hour; sharp/exchange books need a paid plan; WebSocket costs extra; new free keys reported as paused |
+| Is Roobet on the free plan? | **unknown; probably not** (free plans restrict which bookmakers you get) |
+| Suitability for arbitrage | 250 requests/month cannot support continuous scanning. 100 requests/hour is ~1 request per 36 s, workable for a few sports *if* Roobet is included |
+| Decision | **No provider is hard-coded.** Before choosing: sign up for a free key, list the bookmakers it actually exposes, confirm Roobet, sports/markets, update frequency and limits, and record the result here |
+| Key handling | environment variable only (e.g. `ROOBET_ODDS_API_KEY`); never committed, never printed (diagnostics only reports "set"/"not set") |
+| Fallback | none; Roobet stays out |
+
+## Stake  (priority 4)
+
+| | |
+|---|---|
+| Official API | **no documented public odds API** found. Search results describe unofficial wrappers/GraphQL clients that can also place bets and manage accounts: **not used**, they are authenticated/account automation and against the project's rules |
+| Candidate sources | aggregators advertising Stake odds: OddsPapi, SharpAPI, OpticOdds, Betstamp (advertised) |
+| Sports / markets (advertised) | match winner, over/under, Asian handicap, BTTS, player props, live markets |
+| Free tier | same caveat as Roobet: unknown whether Stake is included on any free plan |
+| Decision | **No adapter** until a legitimate source's real Stake coverage and limits have been tested |
+| Fallback | none |
+
+---
+
+## Cost outlook
+
+| Goal | Realistic option |
+|---|---|
+| Keep running for free | the 5 working Slovak sources |
+| Add Roobet/Stake | an aggregator plan that actually includes them; likely a paid tier (tens of USD per month), to be confirmed |
+| Continuous scanning of an aggregator | a plan with at least ~1 request per 30-60 s per sport, or WebSocket streaming |
+
+## Changelog
+- 2026-10-05: initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.
