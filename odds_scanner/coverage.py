@@ -358,18 +358,20 @@ def check_sportmonks(
 ODDSAPIIO_URL = "https://api.odds-api.io/v3/bookmakers"
 
 
-def check_oddsapiio(*, environ: Any = None, session: Any = None) -> BookmakerReport:
-    """Which bookmakers can this Odds-API.io key use? (``GET /v3/bookmakers``, one request)"""
+def check_oddsapiio(
+    *, environ: Any = None, session: Any = None, save_dir: Any = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> BookmakerReport:
+    """Which bookmakers can this Odds-API.io key use? (``GET /v3/bookmakers``; with ``save_dir`` also a real sample)"""
     env = os.environ if environ is None else environ
     title, source = "Odds-API.io (coverage)", ODDSAPIIO_URL
     key = env.get("ODDSAPIIO_API_KEY")
     if not key:
         return _no_key(title, source, "ODDSAPIIO_API_KEY", "https://odds-api.io")
     session = session or new_session()
-    try:
-        response = session.get(ODDSAPIIO_URL, params={"apiKey": key}, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        return _failure(title, source, "UNREACHABLE", "n/a", f"no HTTP answer ({type(exc).__name__}); says nothing about the service")
+    response, problem, attempts = _get_retrying(session, ODDSAPIIO_URL, {"apiKey": key}, sleep)
+    if response is None:
+        return _failure(title, source, "UNREACHABLE", "n/a", f"{problem}; says nothing about the service (tried {attempts} times)")
     if response.status_code != 200:
         status, error = _classify_status(response.status_code, _snippet(response, key))
         if response.status_code == 404:
@@ -379,5 +381,79 @@ def check_oddsapiio(*, environ: Any = None, session: Any = None) -> BookmakerRep
         data = response.json()
     except ValueError:
         return _failure(title, source, "ERROR", "200", "the answer was not JSON")
-    return _summarise(source, title, bookmaker_names(data), 1, [
-        "on a plan with a fixed number of bookmakers (e.g. 2), you choose which ones: check Roobet/Stake/MyStake can be selected"])
+    names = bookmaker_names(data)
+    extra = [
+        "on a plan with a fixed number of bookmakers (e.g. 2), you choose which ones: check Roobet/Stake/MyStake can be selected"]
+    sent = attempts
+    if save_dir:
+        lines, used = sample_oddsapiio(save_dir, key=key, session=session, names=names, sleep=sleep)
+        extra += lines
+        sent += used
+    return _summarise(source, title, names, sent, extra)
+
+
+# ---------------------------------------------------------------------- Odds-API.io: one real sample
+ODDSAPIIO_EVENTS_URL = "https://api.odds-api.io/v3/events"
+ODDSAPIIO_ODDS_URL = "https://api.odds-api.io/v3/odds"
+ODDSAPIIO_WANTED = ("Stake", "Roobet", "MyStake")
+
+
+def sample_oddsapiio(
+    save_dir: Any, *, key: str, session: Any, names: set[str], sleep: Callable[[float], None],
+) -> tuple[list[str], int]:
+    """Fetch a few upcoming football events that Stake lists, then ONE event's odds; save both.
+
+    The vendor's own examples are the only documentation used here (``/v3/events?sport=..&bookmaker=..`` and
+    ``/v3/odds?eventId=..&bookmakers=..``), so the report only says what it can verify from the answers:
+    which wanted bookmakers are mentioned in the odds response and how many odds-like numbers it holds.
+    """
+    import json
+    from pathlib import Path
+
+    from odds_scanner.diagnostics import analyse_json
+
+    lines: list[str] = []
+    sent = 0
+    exact = {n.lower(): n for n in names}
+    wanted = [exact[w.lower()] for w in ODDSAPIIO_WANTED if w.lower() in exact] or list(ODDSAPIIO_WANTED)
+
+    def get(url: str, params: dict[str, Any]) -> Any:
+        nonlocal sent
+        sleep(MIN_INTERVAL)
+        response, problem, attempts = _get_retrying(session, url, {**params, "apiKey": key}, sleep)
+        sent += attempts
+        if response is None:
+            raise _SampleError(problem)
+        if response.status_code != 200:
+            detail = _snippet(response, key)
+            raise _SampleError(f"HTTP {response.status_code}" + (f" - service says: {detail}" if detail else ""))
+        try:
+            return response.json()
+        except ValueError:
+            raise _SampleError("the answer was not JSON") from None
+
+    def save(name: str, data: Any) -> None:
+        target = Path(save_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(data, ensure_ascii=False)
+        (target / name).write_text(text, encoding="utf-8")
+        lines.append(f"saved {name} ({len(text)} characters; public odds data only, no key)")
+
+    try:
+        events = get(ODDSAPIIO_EVENTS_URL, {"sport": "football", "bookmaker": wanted[0], "limit": 10})
+        save("oddsapiio_events.json", events)
+        ids = collect_values(events, "id", limit=3)
+        lines.append(f"upcoming football events returned for {wanted[0]}: {_count_key(events, 'id')}")
+        if not ids:
+            lines.append("no event id found in the answer: send me oddsapiio_events.json so I can read its structure")
+            return lines, sent
+        odds = get(ODDSAPIIO_ODDS_URL, {"eventId": ids[0], "bookmakers": ",".join(wanted)})
+        save("oddsapiio_odds.json", odds)
+        blob = json.dumps(odds, ensure_ascii=False).lower()
+        for name in wanted:
+            lines.append(f"  {name:<9} {'mentioned in the odds answer' if name.lower() in blob else 'NOT in the odds answer for this event'}")
+        odds_values, _ = analyse_json(odds)
+        lines.append(f"odds-like numbers in the answer: {odds_values}")
+    except _SampleError as exc:
+        lines.append(f"sample failed: {exc} (requests used: {sent})")
+    return lines, sent

@@ -221,7 +221,7 @@ def test_oddsapiio_no_key_found_and_errors(monkeypatch):
     assert r.status == "ERROR" and "endpoint may have changed" in r.error
     assert c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(Resp(401, text="x", ctype="text/html"))).status == "AUTH_FAILED"
     leaky = requests.ConnectionError(f"https://api.odds-api.io/v3/bookmakers?apiKey={KEY}")
-    assert KEY not in render(c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(leaky)))
+    assert KEY not in render(c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(leaky, leaky, leaky), sleep=lambda x: None))
 
 
 def test_the_services_own_error_message_is_shown_with_the_key_removed():
@@ -278,3 +278,36 @@ def test_sample_gives_up_after_the_candidates_and_other_403s_are_not_skipped(tmp
 def test_collect_values():
     assert c.collect_values({"a": [{"fixtureId": "x"}, {"fixtureId": "y"}, {"fixtureId": "x"}]}, "fixtureId", limit=5) == ["x", "y"]
     assert c.collect_values({"a": 1}, "fixtureId", limit=3) == []
+
+
+# ------------------------------------------------------------------ Odds-API.io: one real sample
+OAI_LIST = lambda: Resp(200, body=[{"name": "Stake"}, {"name": "Roobet"}, {"name": "Bet365"}])  # noqa: E731
+OAI_EVENTS = lambda: Resp(200, body=[{"id": 111, "home": "A", "away": "B"}, {"id": 112}])  # noqa: E731
+OAI_ODDS = lambda: Resp(200, body={"id": 111, "bookmakers": {"Stake": {"markets": [{"name": "ML", "odds": [{"home": 1.9, "away": 2.1}]}]}}, "price": 1.5, "odds": 2.0})  # noqa: E731
+
+
+def test_oddsapiio_sample_saves_files_and_reports_what_it_can_verify(tmp_path):
+    s = Session(OAI_LIST(), OAI_EVENTS(), OAI_ODDS())
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None)
+    text = render(r)
+    assert s.calls[1][0] == "https://api.odds-api.io/v3/events" and s.calls[1][1] == {"sport": "football", "bookmaker": "Stake", "limit": 10, "apiKey": KEY}
+    assert s.calls[2][0] == "https://api.odds-api.io/v3/odds" and s.calls[2][1]["eventId"] == 111 and s.calls[2][1]["bookmakers"] == "Stake,Roobet"
+    assert "upcoming football events returned for Stake: 2" in text and "(requests sent: 3)" in text
+    assert "Stake     mentioned in the odds answer" in text and "Roobet    NOT in the odds answer for this event" in text
+    assert "odds-like numbers in the answer: 2" in text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["oddsapiio_events.json", "oddsapiio_odds.json"]
+    assert KEY not in text and all(KEY not in p.read_text() for p in tmp_path.iterdir())
+
+
+def test_oddsapiio_sample_failures_and_no_save_dir(tmp_path):
+    s = Session(OAI_LIST())
+    c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=s, sleep=lambda x: None)
+    assert len(s.calls) == 1  # no --save: only the list request
+    bad = Resp(403, text='{"message": "bookmaker not in your plan"}', ctype="application/json")
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(OAI_LIST(), bad), save_dir=tmp_path, sleep=lambda x: None)
+    assert "sample failed: HTTP 403 - service says: " in render(r) and "not in your plan" in render(r)
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(OAI_LIST(), Resp(200, body={"x": 1})), save_dir=tmp_path, sleep=lambda x: None)
+    assert "no event id found" in render(r)
+    leaky = requests.ConnectionError(f"https://x?apiKey={KEY}")
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(leaky, leaky, leaky), sleep=lambda x: None)
+    assert r.status == "UNREACHABLE" and KEY not in render(r)

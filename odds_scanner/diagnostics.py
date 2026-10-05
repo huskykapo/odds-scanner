@@ -545,7 +545,7 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
             from odds_scanner import coverage
 
             report = (coverage.check_oddspapi(save_dir=save_dir) if name == "oddspapi"
-                      else coverage.check_oddsapiio() if name == "oddsapiio" else coverage.check_sportmonks())
+                      else coverage.check_oddsapiio(save_dir=save_dir) if name == "oddsapiio" else coverage.check_sportmonks())
         else:
             out(f"unknown bookmaker {name!r}; choose one of: all, {', '.join(available_targets())}")
             return 2

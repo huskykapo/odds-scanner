@@ -195,6 +195,15 @@ So no single provider is *verified* to carry the Slovak `.sk` versions of Tipspo
 Practical combination: keep the five direct Slovak sources (working), add Odds-API.io for the crypto books, and test
 whether its list contains `.sk` versions: `py start.py diagnostics oddsapiio` (key in `ODDSAPIIO_API_KEY`).
 
+### Odds-API.io: current plans (research 2026-10-05; advertised, NOT tested)
+
+The free plan is no longer available to new users (owner checked). Smallest paid plan, **Solo: GBP 49/month (or 490/year), 2 bookmakers,
+5,000 requests/hour, no monthly cap, "7-day money-back guarantee on card payments", cancel anytime**. Two bookmakers = Stake + Roobet would fit
+exactly; a third (MyStake) needs the next tier. Our need is ~240 requests/hour at 30 s polling, far below the cap. NOT verified: that Stake and
+Roobet are selectable on Solo, the refund terms, and the price/freshness of the data. Before paying: read the refund terms, choose monthly (not
+yearly), then run `py start.py diagnostics oddsapiio --save oddsapiio_samples` in the first hour (one command: bookmaker list, upcoming events,
+one event's odds) and compare the odds with your own Stake and Roobet accounts.
+
 ## Cost outlook
 
 | Goal | Realistic option |
