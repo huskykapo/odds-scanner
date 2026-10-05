@@ -302,6 +302,42 @@ The most useful settings:
 makes a provider read a saved response instead of calling the site (then only sports with a sample
 are polled).
 
+### Validation, confidence, RECHECK and alerts (how an arb becomes an alert)
+
+A raw arbitrage is only a *candidate*. Before it is announced it becomes an **opportunity**:
+
+1. **Validation** (all must pass): event identity (two different bookmakers, match not started),
+   market identity (one market/line, distinct outcomes), **odds freshness** (every price at most
+   `validation.max_odds_age_seconds` old), a complete arbitrage (all outcomes covered, inverse odds < 1),
+   **minimum stakes** (from `bookmaker_settings`; maximum stakes are not published by these sources, so
+   check each bookmaker), and a **recalculation** from the leg odds that must match the reported stakes/profit.
+2. **Confirmation:** a fresh poll of *every* bookmaker involved must still show it
+   (`validation.confirm_polls`, default 1; 0 = alert at once). This delays an alert by up to the slowest
+   involved bookmaker's poll interval, and it removes most false alarms. `--once` scans skip this step.
+3. **Notify once:** one opportunity = event + market + line + which bookmaker is used for which outcome.
+   `+2.84 % -> +2.90 % -> +2.75 %` is one opportunity and one alert. You are alerted again only if it
+   **disappeared and came back** (unseen for `validation.gone_after_seconds`), its **ROI moved** by at least
+   `validation.renotify_roi_delta` points (and `renotify_min_interval_seconds` passed), or the **combination
+   changed** (another bookmaker for an outcome is a different opportunity). A failed or partial Telegram send is
+   not forgotten: it is offered again next cycle.
+
+**Confidence** (shown as HIGH / MEDIUM / LOW with the reasons on hover) is a deterministic score, not AI:
+start at 100; -20 if the match was joined by team names + kick-off (not an exact Betradar id; Niké has none);
+-5/-15/-30 for prices older than 30/60/120 s; -25 if not yet confirmed; -15 for ROI above 5 % and -40 above
+`verify_above_percent`; -15 for a whole-number line (push); capped at 20 if any validation check failed.
+80+ is HIGH, 55+ MEDIUM.
+
+**RECHECK ODDS** (button on every card, `POST /api/recheck`): re-fetches *only* the bookmakers (and sport) of that
+opportunity, re-runs the whole pipeline and shows **🟢 ARBITRAGE STILL AVAILABLE** (with any changed odds),
+**🔴 ARBITRAGE NO LONGER AVAILABLE**, or **⚪ COULD NOT CONFIRM** if any bookmaker could not be re-fetched (it
+never claims an arb is valid from stale data). At most one recheck per opportunity every 5 seconds. The
+**OPEN <BOOKMAKER>** buttons only open the bookmaker's page in a new tab. Nothing in this program places or
+prepares a bet.
+
+Telegram alerts carry the event, market, ROI, bankroll, each bookmaker with the selection, odds and stake,
+the guaranteed return and profit, odds age, confidence and (if `notifications.dashboard_url` is set) an
+**OPEN DASHBOARD** link.
+
 ### Telegram alerts
 
 The easy way: run `py start.py telegram-test` (or `python -m odds_scanner telegram-test`) and follow

@@ -35,6 +35,18 @@
   .b-new { background: var(--newline); color: #000; }
   .b-verify { background: var(--bad); color: #fff; }
   .b-push { background: var(--warn); color: #000; }
+  .b-ok { background: var(--ok); color: #fff; } .b-pend { background: var(--muted); color: #fff; } .b-bad { background: var(--bad); color: #fff; }
+  .b-conf { background: transparent; border: 1px solid var(--line); color: var(--fg); cursor: help; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  a.btn, button.btn { font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+                      border-radius: 6px; padding: 6px 10px; text-decoration: none; letter-spacing: .02em; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn:disabled { opacity: .6; cursor: wait; }
+  .recheck { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 13px; }
+  .recheck.ok { border-color: var(--ok); } .recheck.bad { border-color: var(--bad); } .recheck.warn { border-color: var(--warn); }
+  .recheck b { display: block; margin-bottom: 3px; font-size: 14px; }
+  .recheck ul { margin: 6px 0 0; padding-left: 18px; }
+  .card.ghost .ev, .card.ghost .meta { opacity: .6; }
   table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   th, td { text-align: left; padding: 6px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
@@ -165,6 +177,61 @@ async function copy(text, btn) {
   setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("copied"); }, 1500);
 }
 
+const rechecks = {};  // fingerprint -> { busy } | { result, at, card }
+const STATUS = { VERIFIED: ["b-ok", "VERIFIED", "Seen again on a fresh poll of every bookmaker involved, and all checks passed"],
+                 PENDING: ["b-pend", "PENDING", "Found, waiting for a fresh poll to confirm it"],
+                 FAILED: ["b-bad", "CHECK FAILED", "A validation check failed - see the details"] };
+function statusBadges(a) {
+  const st = STATUS[a.status];
+  const failed = (a.checks || []).filter((c) => c.blocking && !c.ok).map((c) => c.name + ": " + c.detail);
+  return [st ? h("span", { class: "badge " + st[0], title: failed.length ? failed.join("\n") : st[2] }, st[1]) : null,
+          a.confidence_label ? h("span", { class: "badge b-conf", title: (a.confidence_reasons || []).join("\n") }, `${a.confidence_label} ${a.confidence}`) : null];
+}
+function infoLine(a, p, bankroll) {
+  const ages = a.legs.map((l) => ago(l.updated)).filter((x) => x !== null);
+  const oldest = ages.length ? Math.max(...ages) + "s" : "unknown";
+  const verified = a.verified_at ? ago(a.verified_at) + "s ago" : "not yet";
+  return h("div", { class: "meta", style: "margin-top:6px" },
+    `ROI ${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(2)}% · bankroll ${money(bankroll)} ${state.currency} · odds age ${oldest} · first seen ${ago(a.first_seen)}s ago · last verified ${verified}`);
+}
+function actionsRow(a) {
+  const seen = new Set(), links = [];
+  for (const l of a.legs) {
+    const url = safeUrl(l.url) || safeUrl(l.homepage);
+    if (!url || seen.has(l.bookmaker_key)) continue;
+    seen.add(l.bookmaker_key);
+    // These only OPEN the bookmaker's page in a new tab. Nothing here ever submits a bet.
+    links.push(h("a", { class: "btn", href: url, target: "_blank", rel: "noopener noreferrer" }, "OPEN " + l.bookmaker.toUpperCase()));
+  }
+  const busy = rechecks[a.fingerprint] && rechecks[a.fingerprint].busy;
+  const btn = h("button", { type: "button", class: "btn primary", title: "Re-fetch the current odds from the bookmakers involved and recalculate", disabled: busy ? "" : null },
+                busy ? "CHECKING…" : "RECHECK ODDS");
+  btn.addEventListener("click", () => recheck(a));
+  return h("div", { class: "actions" }, links, btn);
+}
+function recheckBox(a) {
+  const rc = rechecks[a.fingerprint];
+  if (!rc) return null;
+  if (rc.busy) return h("div", { class: "recheck warn" }, "Fetching the current odds from the bookmakers involved…");
+  const res = rc.result, at = new Date(rc.at).toLocaleTimeString();
+  const [cls, head] = ({ STILL_AVAILABLE: ["ok", "🟢 ARBITRAGE STILL AVAILABLE"], NO_LONGER_AVAILABLE: ["bad", "🔴 ARBITRAGE NO LONGER AVAILABLE"],
+                         COOLDOWN: ["warn", "⏳ RECHECKED A MOMENT AGO"], UNKNOWN: ["warn", "⚪ COULD NOT CONFIRM"] })[res.status] || ["warn", res.status];
+  return h("div", { class: "recheck " + cls }, h("b", {}, head), `${res.message} (checked ${at})`,
+    (res.changes || []).length ? h("ul", {}, res.changes.map((c) => h("li", {}, `${c.bookmaker} ${c.outcome}: ${c.old_odds.toFixed(2)} → ${c.new_odds.toFixed(2)}`))) : null);
+}
+async function recheck(a) {
+  rechecks[a.fingerprint] = { busy: true, card: a }; render();
+  try {
+    const r = await fetch("/api/recheck", { method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "odds-scanner" }, body: JSON.stringify({ id: a.fingerprint }) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    rechecks[a.fingerprint] = { result: await r.json(), at: Date.now(), card: a };
+  } catch (e) {
+    rechecks[a.fingerprint] = { result: { status: "UNKNOWN", message: "The recheck request failed (" + e.message + ").", changes: [] }, at: Date.now(), card: a };
+  }
+  render(); refresh();
+}
+
 function render() {
   if (!state) return;
   const bankroll = parseFloat($("bankroll").value) || state.bankroll;
@@ -210,14 +277,23 @@ function render() {
           h("div", { class: "ev" }, a.event,
             r_is(newest, a) && isNew ? h("span", { class: "badge b-new" }, "NEWEST") : (isNew ? h("span", { class: "badge b-new" }, "NEW") : null),
             a.verify ? h("span", { class: "badge b-verify", title: "Unusually high profit: probably a pricing error or stale odds" }, "VERIFY MANUALLY") : null,
-            a.push_possible ? h("span", { class: "badge b-push", title: "Whole-number line: a push refunds bets" }, "push risk") : null),
+            a.push_possible ? h("span", { class: "badge b-push", title: "Whole-number line: a push refunds bets" }, "push risk") : null,
+            statusBadges(a)),
           h("div", { class: "meta" }, `${a.sport} · ${fmtTime(a.start)} · ${a.market_label}`)),
         h("div", { class: "profit" + (p.pct < 1 ? " small" : "") }, dead ? "rounding kills it" : p.pct.toFixed(2) + " %")),
       h("table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "Bookmaker"), h("th", {}, "Bet"), h("th", { class: "num" }, "Odds"),
           h("th", { class: "num" }, "Stake"), h("th", {}, ""), h("th", { class: "num", title: "what you get back if this bet wins (stake included)" }, "Returns"), h("th", { class: "num" }, "Age"))),
         h("tbody", {}, legs)),
-      summary(p, state.currency, age !== null ? `seen ${age}s ago` : null)));
+      summary(p, state.currency, age !== null ? `seen ${age}s ago` : null),
+      infoLine(a, p, bankroll), actionsRow(a), recheckBox(a)));
+  }
+
+  // A rechecked opportunity that has just disappeared would take its verdict with it: keep a faded card for 2 minutes.
+  const present = new Set(state.arbs.map((x) => x.fingerprint));
+  for (const [fp, rc] of Object.entries(rechecks)) {
+    if (rc.busy || present.has(fp) || Date.now() - rc.at > 120000) { if (!rc.busy && !present.has(fp) && Date.now() - rc.at > 120000) delete rechecks[fp]; continue; }
+    box.append(h("div", { class: "card ghost" }, h("div", { class: "ev" }, rc.card.event), h("div", { class: "meta" }, `${rc.card.sport} · ${fmtTime(rc.card.start)} · ${rc.card.market_label}`), recheckBox(rc.card)));
   }
 
   const tbody = $("providers").tBodies[0]; tbody.replaceChildren();

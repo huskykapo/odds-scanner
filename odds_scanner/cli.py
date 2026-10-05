@@ -228,7 +228,7 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
         try:
             dash = Dashboard(
                 engine.snapshot, cfg.dashboard.host, cfg.dashboard.port,
-                get_history=history_reader(cfg), get_near_misses=engine.near_miss_snapshot,
+                get_history=history_reader(cfg), get_near_misses=engine.near_miss_snapshot, recheck=engine.recheck,
             )
         except OSError as exc:
             raise ConfigError(f"cannot open the dashboard on port {cfg.dashboard.port}: {exc}") from exc

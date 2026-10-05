@@ -26,6 +26,7 @@ def make_handler(
     get_history: Callable[[], Any] | None = None,
     get_near_misses: Callable[[], Any] | None = None,
     near_page: bytes | None = None,
+    recheck: Callable[[str], Any] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "odds-scanner"
@@ -55,6 +56,36 @@ def make_handler(
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found")
 
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            """Only ``/api/recheck``: re-fetch the odds of one opportunity. Read-only; places no bet."""
+            path = self.path.split("?", 1)[0]
+            if path != "/api/recheck" or recheck is None:
+                self._send(404, "text/plain; charset=utf-8", b"not found")
+                return
+            # A header a web page on another site cannot add without a CORS preflight (which we never allow):
+            # stops other sites from making your browser trigger rechecks.
+            if self.headers.get("X-Requested-With") != "odds-scanner":
+                self._send(403, "text/plain; charset=utf-8", b"forbidden")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError("bad length")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                fingerprint = payload["id"]
+                if not isinstance(fingerprint, str) or not fingerprint or len(fingerprint) > 500:
+                    raise ValueError("bad id")
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                self._send(400, "text/plain; charset=utf-8", b"bad request")
+                return
+            try:
+                body = json.dumps(recheck(fingerprint), ensure_ascii=False).encode("utf-8")
+            except Exception:  # noqa: BLE001
+                log.exception("recheck failed")
+                self._send(500, "text/plain; charset=utf-8", b"internal error")
+                return
+            self._send(200, "application/json; charset=utf-8", body)
+
         def _send(self, status: int, ctype: str, body: bytes) -> None:
             self.send_response(status)
             self.send_header("Content-Type", ctype)
@@ -78,10 +109,11 @@ class Dashboard:
         port: int = 8765,
         get_history: Callable[[], Any] | None = None,
         get_near_misses: Callable[[], Any] | None = None,
+        recheck: Callable[[str], Any] | None = None,
     ) -> None:
         near_page = NEAR_PAGE.read_bytes() if get_near_misses is not None else None
         self._server = ThreadingHTTPServer(
-            (host, port), make_handler(get_state, PAGE.read_bytes(), get_history, get_near_misses, near_page)
+            (host, port), make_handler(get_state, PAGE.read_bytes(), get_history, get_near_misses, near_page, recheck)
         )
         self._server.daemon_threads = True
         self._thread: threading.Thread | None = None

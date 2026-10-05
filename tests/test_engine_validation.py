@@ -212,3 +212,64 @@ def test_recheck_result_is_json_serialisable():
     fp = verified(eng)
     clock.advance(10)
     json.dumps(eng.recheck(fp))
+
+
+# ------------------------------------------------------------------ HTTP: POST /api/recheck
+import urllib.error
+import urllib.request
+
+from odds_scanner.dashboard import Dashboard
+
+
+def _post(port, path, body=b"{}", headers=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, method="POST", headers=headers or {})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        r = opener.open(req, timeout=5)
+        return r.status, r.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
+GOOD = {"X-Requested-With": "odds-scanner", "Content-Type": "application/json"}
+
+
+def test_recheck_endpoint_guards_and_result():
+    eng, clock, _ = make(validation=ValidationSettings(confirm_polls=0))
+    fp = verified(eng)
+    clock.advance(10)
+    dash = Dashboard(eng.snapshot, "127.0.0.1", 0, recheck=eng.recheck)
+    dash.start()
+    try:
+        port = dash.port
+        assert _post(port, "/api/recheck", json.dumps({"id": fp}).encode(), {"Content-Type": "application/json"})[0] == 403  # no custom header
+        assert _post(port, "/api/recheck", b"not json", GOOD)[0] == 400
+        assert _post(port, "/api/recheck", json.dumps({"id": 5}).encode(), GOOD)[0] == 400
+        assert _post(port, "/api/recheck", b"x" * 5000, GOOD)[0] == 400  # oversized body
+        assert _post(port, "/api/other", json.dumps({"id": fp}).encode(), GOOD)[0] == 404
+        status, body = _post(port, "/api/recheck", json.dumps({"id": fp}).encode(), GOOD)
+        assert status == 200 and json.loads(body)["status"] == "STILL_AVAILABLE"
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with pytest.raises(urllib.error.HTTPError) as ei:
+            opener.open(f"http://127.0.0.1:{port}/api/recheck", timeout=5)  # GET is not allowed
+        assert ei.value.code == 404
+    finally:
+        dash.stop()
+
+
+def test_recheck_route_absent_when_not_configured():
+    eng, _, _ = make()
+    dash = Dashboard(eng.snapshot, "127.0.0.1", 0)
+    dash.start()
+    try:
+        assert _post(dash.port, "/api/recheck", b'{"id": "x"}', GOOD)[0] == 404
+    finally:
+        dash.stop()
+
+
+def test_the_page_has_open_buttons_and_recheck_but_no_bet_submission():
+    html = open("odds_scanner/dashboard.html", encoding="utf-8").read()
+    assert "RECHECK ODDS" in html and '"OPEN "' in html and "/api/recheck" in html
+    # the page only reads data and opens links: no code that submits anything to a bookmaker
+    for forbidden in ("placeBet", "place_bet", "betslip", "submitBet", "/bet"):
+        assert forbidden not in html
