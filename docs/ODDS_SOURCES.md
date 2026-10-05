@@ -114,6 +114,37 @@ Re-run `py start.py diagnostics chance` occasionally; only a normal anonymous 20
 
 ---
 
+---
+
+## Research log: legitimate routes to Tipsport SK, Chance SK, Roobet, Stake (2026-10-05)
+
+Everything below comes from search summaries or vendor pages that could not be opened from the build
+environment. It is **advertised, not verified**. No key was available, so nothing was tested live.
+
+| Candidate | Claims (advertised) | Price / limits (advertised) | Caveats |
+|---|---|---|---|
+| **SportMonks** Premium Odds Feed (built with TXODDS) | bookmaker list includes **Tipsport-SK** and IFortuna; "Slovak and German variants are covered, Czech variants (Tipsport CZ, Fortuna CZ, Chance, SynotTip) are not" | Premium Odds Feed ~EUR 129/month on top of a base plan (from EUR 29/month); 14-day trial on paid plans; free plan limited to two leagues | pre-match odds; football-centred; whether **Chance SK** is carried is unclear; update delay unknown |
+| **PulseScore** | Tipsport pre-match + live, 18 sports | not checked | describes **Tipsport (Czech)**, not tipsport.sk |
+| **OddsPapi** | 350+ bookmakers; its own pages list Stake and Roobet | free 250 requests/month; paid from ~USD 49/month; WebSocket on paid tiers | one search summary said Roobet coverage was not confirmed; Tipsport/Chance coverage not found |
+| **Odds-API.io** | 265-365+ bookmakers, REST + WebSocket | free: 2 "recreational" bookmakers, 100 requests/hour (new free keys reported paused); paid ~USD 65+/month; WebSocket costs extra | sharp/exchange books need a paid plan; Roobet/Stake/Tipsport coverage not confirmed |
+| **SharpAPI, OpticOdds, Betstamp** | advertise Stake odds | not checked | Roobet/Tipsport/Chance not found |
+| **Apify "Tipsport Betting Odds Scraper"** | a "Tipsport XML" scraper | USD 5.99/month + usage; marked DEPRECATED | how it gets the data is not stated; third-party scrapers often rely on proxy/anti-bot techniques that this project will not use |
+
+**Why a bot can "have" Tipsport and Chance when the sites refuse our client.** Plausible explanations,
+none verified: (1) it buys a licensed aggregator feed; (2) it runs scraping behind residential
+proxies / browser-automation that evades bot protection (not acceptable here); (3) the bot's data is
+Czech Tipsport, not tipsport.sk. Identify the bot before assuming which.
+
+**Consequences of an aggregator feed.** Prices are delayed relative to the bookmaker's own site, so
+arbs from it are likelier to be stale; a RECHECK can only re-query the same aggregator, not the bookmaker,
+and every bet must be verified by hand on the bookmaker's site.
+
+**Test plan (cheapest first, each recorded here with a date and the real numbers):**
+1. OddsPapi free key: list the bookmakers the key returns; look for Roobet, Stake, Tipsport, Chance.
+2. SportMonks 14-day trial: look for Tipsport-SK / Chance in the bookmaker list and check update delay.
+3. Odds-API.io free key: check its bookmaker list.
+Only a source that actually returns the bookmaker gets an adapter.
+
 ## Cost outlook
 
 | Goal | Realistic option |
