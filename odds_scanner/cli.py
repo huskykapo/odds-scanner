@@ -248,9 +248,11 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         epilog="commands: run (default) - scan and serve the dashboard; probe - check each bookmaker endpoint once; "
         "probe-fortuna - check whether Fortuna's football page contains match data; "
         "telegram-test - guided Telegram alert setup and test message; "
+        "diagnostics <bookmaker|all> - read-only check of one bookmaker's data source; "
         "capture - save each bookmaker's raw responses into a ZIP (to add new bet types).",
     )
-    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture"))
+    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture", "diagnostics"))
+    ap.add_argument("target", nargs="?", help="for diagnostics: all | tipsport | chance | roobet | stake | <any working bookmaker>")
     ap.add_argument("-c", "--config", default="config.yaml", help="path to config file (default: %(default)s)")
     ap.add_argument("--once", action="store_true", help="scan once and exit instead of polling forever")
     ap.add_argument("--no-dashboard", action="store_true", help="do not start the web dashboard")
@@ -281,6 +283,14 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command == "diagnostics":
+        from odds_scanner.diagnostics import available_targets, run as run_diagnostics
+
+        setup_logging(args.log_level or "WARNING")
+        if not args.target:
+            print("usage: diagnostics <bookmaker>   where bookmaker is one of: all, " + ", ".join(available_targets()))
+            return EXIT_CONFIG
+        return run_diagnostics(args.target)
     if args.command == "probe-fortuna":
         from odds_scanner.probe import probe_fortuna
 
