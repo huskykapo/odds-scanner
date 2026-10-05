@@ -124,3 +124,65 @@ def test_run_target_names_and_all_excludes_aggregators(monkeypatch):
     monkeypatch.setattr(d, "diagnose_site", lambda site, **kw: d.SiteReport(site, verdict="INCONCLUSIVE"))
     d.run("all", out=lambda s: None)
     assert called == []  # "all" never spends aggregator quota
+
+
+# ------------------------------------------------------------------ OddsPapi: one real sample
+from datetime import date
+
+
+LIST = Resp(200, body=[{"name": "roobet"}, {"name": "stake"}, {"name": "pinnacle"}, {"name": "bet365"}])
+FIXTURES = Resp(200, body={"data": [{"fixtureId": "id100", "participant1": "A"}, {"fixtureId": "id101"}]})
+ODDS = Resp(200, body={"fixtureId": "id100", "bookmakerOdds": {"pinnacle": {"markets": {"101": {}, "104": {}}}, "stake": {"markets": {"101": {}}}}})
+
+
+def test_sample_fetches_one_fixture_saves_files_and_reports_per_bookmaker(tmp_path):
+    s = Session(LIST, FIXTURES, ODDS)
+    sleeps = []
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=sleeps.append, today=date(2026, 10, 5))
+    text = render(r)
+    assert "(requests sent: 3)" in text and sleeps == [c.MIN_INTERVAL, c.MIN_INTERVAL]
+    fixtures_call, odds_call = s.calls[1], s.calls[2]
+    assert fixtures_call[0].endswith("/v4/fixtures")
+    assert fixtures_call[1] == {"sportId": 10, "from": "2026-10-05", "to": "2026-10-08", "hasOdds": "true", "apiKey": KEY}
+    assert odds_call[1]["fixtureId"] == "id100" and odds_call[1]["bookmakers"] == "roobet,stake,pinnacle" and odds_call[1]["oddsFormat"] == "decimal"
+    assert "fixtures with odds in the next 3 days (football): 2" in text
+    assert "pinnacle  odds returned (2 markets)" in text and "stake     odds returned (1 markets)" in text
+    assert "roobet    NO ODDS returned for this fixture on this plan" in text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["oddspapi_fixtures.json", "oddspapi_odds.json"]
+    assert all(KEY not in p.read_text() for p in tmp_path.iterdir()) and KEY not in text
+
+
+def test_sample_is_skipped_without_save_dir_and_errors_are_reported_without_the_key(tmp_path):
+    s = Session(LIST)
+    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s)
+    assert len(s.calls) == 1  # no --save -> only the free list request
+    leaky = requests.ConnectionError(f"https://api.oddspapi.io/v4/fixtures?apiKey={KEY}")
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, leaky), save_dir=tmp_path, sleep=lambda x: None)
+    assert "sample failed: no HTTP answer (ConnectionError)" in render(r) and KEY not in render(r)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, FIXTURES, Resp(429, text="x", ctype="text/html")), save_dir=tmp_path, sleep=lambda x: None)
+    assert "sample failed: HTTP 429" in render(r)
+
+
+def test_sample_unrecognised_shapes_ask_for_the_file(tmp_path):
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, Resp(200, body={"nothing": []})), save_dir=tmp_path, sleep=lambda x: None)
+    assert "no fixture id found" in render(r)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(LIST, FIXTURES, Resp(200, body={"x": 1})), save_dir=tmp_path, sleep=lambda x: None)
+    assert "structure was not recognised" in render(r)
+
+
+def test_find_key():
+    assert c.find_key({"a": [{"b": {"fixtureId": "z"}}]}, "fixtureId") == "z" and c.find_key({"a": 1}, "fixtureId") is None
+
+
+def test_mystake_is_its_own_bookmaker_not_part_of_stake():
+    found = c.match_targets({"Stake.com", "stake", "MyStake", "mystake", "Stake BR"})
+    assert found["MyStake"] == ["MyStake", "mystake"]
+    assert found["Stake"] == ["Stake BR", "Stake.com", "stake"]  # MyStake is not counted as Stake
+
+
+def test_sample_asks_for_mystake_too_when_it_is_in_the_list(tmp_path):
+    names = Resp(200, body=[{"name": "roobet"}, {"name": "stake"}, {"name": "mystake"}, {"name": "pinnacle"}])
+    s = Session(names, FIXTURES, ODDS)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None, today=date(2026, 10, 5))
+    assert s.calls[2][1]["bookmakers"] == "roobet,stake,mystake,pinnacle"
+    assert "mystake   NO ODDS returned for this fixture on this plan" in render(r)

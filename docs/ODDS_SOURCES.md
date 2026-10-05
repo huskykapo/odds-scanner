@@ -145,6 +145,23 @@ and every bet must be verified by hand on the bookmaker's site.
 3. Odds-API.io free key: check its bookmaker list.
 Only a source that actually returns the bookmaker gets an adapter.
 
+### OddsPapi coverage - TESTED 2026-10-05 (project owner's PC, free key)
+
+`py start.py diagnostics oddspapi` -> HTTP 200, **720 bookmakers visible** to a free key (1 request).
+
+| Looked for | Result |
+|---|---|
+| Roobet | FOUND (`Roobet`, `roobet`) |
+| Stake | FOUND (`Stake.com`, `stake`, `Stake BR`, `stake.bet.br`; also `MyStake` / `mystake`, a different brand) |
+| MyStake | FOUND (`MyStake`, `mystake`) |
+| Tipsport, Chance, Synot | **not in the list** |
+| Fortuna | only Fortuna PL / RO (not SK) |
+| Pinnacle | FOUND (several variants, incl. `pinnacle+5` / `pinnacle+30` = delayed feeds) |
+
+Listed does not prove the free plan returns their odds. Next test: `py start.py diagnostics oddspapi --save oddspapi_samples`
+(2 requests of the 250/month): fetches one football fixture with Roobet/Stake/MyStake/Pinnacle odds and saves the
+responses so the adapter can be written from the real format.
+
 ## Cost outlook
 
 | Goal | Realistic option |

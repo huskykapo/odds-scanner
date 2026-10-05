@@ -544,7 +544,7 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
         elif name in AGGREGATORS:
             from odds_scanner import coverage
 
-            report = coverage.check_oddspapi() if name == "oddspapi" else coverage.check_sportmonks()
+            report = coverage.check_oddspapi(save_dir=save_dir) if name == "oddspapi" else coverage.check_sportmonks()
         else:
             out(f"unknown bookmaker {name!r}; choose one of: all, {', '.join(available_targets())}")
             return 2
@@ -560,7 +560,7 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m odds_scanner.diagnostics", description=__doc__.split("\n\n")[0])
     ap.add_argument("target", help="all | " + " | ".join(available_targets()))
-    ap.add_argument("--save", metavar="DIR", help="save the public JSON responses of Tipsport/Chance probes to DIR")
+    ap.add_argument("--save", metavar="DIR", help="save public JSON samples to DIR (Tipsport/Chance probes; for oddspapi: one real fixture's odds, costs 2 requests)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
     return run(args.target, save_dir=args.save)

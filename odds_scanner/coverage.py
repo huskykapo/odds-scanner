@@ -28,12 +28,14 @@ MAX_PAGES = 20
 TARGETS: dict[str, tuple[str, ...]] = {
     "Roobet": ("roobet",),
     "Stake": ("stake",),
+    "MyStake": ("mystake",),
     "Tipsport": ("tipsport",),
     "Chance": ("chance",),
     "Fortuna": ("fortuna",),
     "Synot": ("synot",),
     "Pinnacle": ("pinnacle",),
 }
+EXCLUDE: dict[str, tuple[str, ...]] = {"Stake": ("mystake",)}  # a different brand that merely contains "stake"
 NAME_KEYS = frozenset({"name", "title", "slug", "key", "bookmaker", "bookmakername", "displayname", "display_name", "label"})
 
 
@@ -63,7 +65,8 @@ def bookmaker_names(data: Any, *, limit: int = 200_000) -> set[str]:
 def match_targets(names: set[str]) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for label, needles in TARGETS.items():
-        hits = sorted(n for n in names if any(needle in n.lower() for needle in needles))
+        skip = EXCLUDE.get(label, ())
+        hits = sorted(n for n in names if any(needle in n.lower() for needle in needles) and not any(x in n.lower() for x in skip))
         found[label] = hits
     return found
 
@@ -102,7 +105,10 @@ def _classify_status(status: int) -> tuple[str, str]:
 ODDSPAPI_URL = "https://api.oddspapi.io/v4/bookmakers"
 
 
-def check_oddspapi(*, environ: Any = None, session: Any = None) -> BookmakerReport:
+def check_oddspapi(
+    *, environ: Any = None, session: Any = None, save_dir: Any = None,
+    sleep: Callable[[float], None] = time.sleep, today: Any = None,
+) -> BookmakerReport:
     env = os.environ if environ is None else environ
     title, source = "OddsPapi (coverage)", "https://api.oddspapi.io/v4/bookmakers"
     key = env.get("ODDSPAPI_API_KEY")
@@ -120,7 +126,119 @@ def check_oddspapi(*, environ: Any = None, session: Any = None) -> BookmakerRepo
         data = response.json()
     except ValueError:
         return _failure(title, source, "ERROR", "200", "the answer was not JSON")
-    return _summarise(source, title, bookmaker_names(data), 1, [])
+    names = bookmaker_names(data)
+    extra: list[str] = []
+    requests_sent = 1
+    if save_dir:
+        extra, used = sample_oddspapi(save_dir, key=key, session=session, names=names, sleep=sleep, today=today)
+        requests_sent += used
+    return _summarise(source, title, names, requests_sent, extra)
+
+
+# ---------------------------------------------------------------------- OddsPapi: one real sample
+FIXTURES_URL = "https://api.oddspapi.io/v4/fixtures"
+ODDS_URL = "https://api.oddspapi.io/v4/odds"
+FOOTBALL_SPORT_ID = 10  # "soccer" in the vendor's own fixtures example
+SAMPLE_BOOKMAKERS = ("roobet", "stake", "mystake", "pinnacle")  # slugs as they appear in the bookmaker list
+
+
+def find_key(data: Any, key: str, *, limit: int = 200_000) -> Any:
+    """First value stored under ``key`` anywhere in parsed JSON (breadth-first)."""
+    stack, seen = [data], 0
+    while stack and seen < limit:
+        node = stack.pop(0)
+        seen += 1
+        if isinstance(node, dict):
+            if key in node:
+                return node[key]
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+    return None
+
+
+def sample_oddspapi(
+    save_dir: Any, *, key: str, session: Any, names: set[str], sleep: Callable[[float], None], today: Any = None,
+) -> tuple[list[str], int]:
+    """Fetch the next days' football fixtures and ONE fixture's odds for Roobet/Stake/Pinnacle; save both.
+
+    Costs two requests of the vendor quota. Saved files hold public odds data only (the key is never
+    written). Returns (report lines, requests sent).
+    """
+    import json
+    from datetime import date, timedelta
+    from pathlib import Path
+
+    lines: list[str] = []
+    sent = 0
+    day = today or date.today()
+    wanted = [slug for slug in SAMPLE_BOOKMAKERS if slug in {n.lower() for n in names}] or list(SAMPLE_BOOKMAKERS)
+
+    def get(url: str, params: dict[str, Any]) -> Any:
+        nonlocal sent
+        sleep(MIN_INTERVAL)  # also before the first one: the bookmaker-list request just went out
+        sent += 1
+        try:
+            response = session.get(url, params={**params, "apiKey": key}, timeout=TIMEOUT)
+        except requests.RequestException as exc:
+            raise _SampleError(f"no HTTP answer ({type(exc).__name__})") from None
+        if response.status_code != 200:
+            raise _SampleError(f"HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError:
+            raise _SampleError("the answer was not JSON") from None
+
+    def save(name: str, data: Any) -> None:
+        target = Path(save_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(data, ensure_ascii=False)
+        (target / name).write_text(text, encoding="utf-8")
+        lines.append(f"saved {name} ({len(text)} characters; public odds data only, no key)")
+
+    try:
+        fixtures = get(FIXTURES_URL, {"sportId": FOOTBALL_SPORT_ID, "from": day.isoformat(),
+                                      "to": (day + timedelta(days=3)).isoformat(), "hasOdds": "true"})
+        save("oddspapi_fixtures.json", fixtures)
+        count = _count_key(fixtures, "fixtureId")
+        lines.append(f"fixtures with odds in the next 3 days (football): {count}")
+        fixture_id = find_key(fixtures, "fixtureId")
+        if not isinstance(fixture_id, (str, int)):
+            lines.append("no fixture id found in the answer: send me oddspapi_fixtures.json so I can read its structure")
+            return lines, sent
+        odds = get(ODDS_URL, {"fixtureId": fixture_id, "bookmakers": ",".join(wanted), "oddsFormat": "decimal", "verbosity": 3})
+        save("oddspapi_odds.json", odds)
+        book_odds = find_key(odds, "bookmakerOdds")
+        if isinstance(book_odds, dict):
+            for slug in wanted:
+                node = book_odds.get(slug)
+                if node is None:
+                    lines.append(f"  {slug:<9} NO ODDS returned for this fixture on this plan")
+                else:
+                    markets = node.get("markets") if isinstance(node, dict) else None
+                    lines.append(f"  {slug:<9} odds returned" + (f" ({len(markets)} markets)" if isinstance(markets, (dict, list)) else ""))
+        else:
+            lines.append("odds saved, but the 'bookmakerOdds' structure was not recognised: send me oddspapi_odds.json")
+    except _SampleError as exc:
+        lines.append(f"sample failed: {exc} (requests used: {sent})")
+    return lines, sent
+
+
+class _SampleError(Exception):
+    pass
+
+
+def _count_key(data: Any, key: str, *, limit: int = 200_000) -> int:
+    stack, seen, found = [data], 0, 0
+    while stack and seen < limit:
+        node = stack.pop()
+        seen += 1
+        if isinstance(node, dict):
+            found += key in node
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+    return found
 
 
 # ---------------------------------------------------------------------- SportMonks
