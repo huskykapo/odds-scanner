@@ -219,6 +219,19 @@ sites cannot be bet on with a Slovak account). Still unverified: that Roobet/Sta
 Compared with OddsPapi (720 bookmakers, includes Pinnacle, same three crypto books, no Tipsport/Chance): both cover the three target books;
 the choice is price, reliability (OddsPapi's login errored intermittently) and request limits.
 
+### Is there ONE feed with both Slovak `.sk` and crypto books? (web research 2026-10-05, advertised only, NOT tested)
+
+| Provider | Slovak | Crypto | Notes |
+|---|---|---|---|
+| Betburger (arb-scanner service) | Nike.sk, iFortuna.sk (prematch) | unconfirmed | 140+ books; Tipsport.sk, Tipos, Stake, Roobet not confirmed; API access/price unconfirmed |
+| Oddsmarket | unconfirmed | unconfirmed | 150-300+ books, WebSocket ~1 s; no public price found |
+| SportMonks Premium Odds | Tipsport-SK, iFortuna | none | about EUR 129/month |
+| OddsPapi / Odds-API.io | none (CZ only on Odds-API.io) | Roobet, Stake, MyStake | tested above |
+| LSports / Sportradar / BetsAPI | nothing specific found | nothing specific found | enterprise-priced |
+
+Conclusion: no single feed is verified to carry both groups. Practical setup: the direct Slovak feeds (free) + one crypto feed.
+The only lead for a combined feed is Betburger; check its bookmaker list and API price before considering it.
+
 ## Cost outlook
 
 | Goal | Realistic option |
