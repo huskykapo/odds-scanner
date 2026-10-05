@@ -261,6 +261,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--bankroll", type=float, help="override bankroll from config")
     ap.add_argument("--min-profit", type=float, metavar="PCT", help="override min profit %% threshold from config")
     ap.add_argument("--log-level", help="override log level (DEBUG, INFO, WARNING, ...)")
+    ap.add_argument("--save", metavar="DIR", help="diagnostics tipsport|chance: save the public JSON responses to DIR")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return ap.parse_args(argv)
 
@@ -290,7 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.target:
             print("usage: diagnostics <bookmaker>   where bookmaker is one of: all, " + ", ".join(available_targets()))
             return EXIT_CONFIG
-        return run_diagnostics(args.target)
+        return run_diagnostics(args.target, save_dir=args.save)
     if args.command == "probe-fortuna":
         from odds_scanner.probe import probe_fortuna
 

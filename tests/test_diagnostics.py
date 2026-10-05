@@ -54,7 +54,7 @@ class Session:
 
 
 ODDS_PAYLOAD = {"matches": [{"id": 77, "nameFull": "A - B", "participants": ["A", "B"], "odds": [{"rate": 1.9}, {"rate": 2.1}, {"rate": 3.4}]}]}
-SPORTS_PAYLOAD = {"sports": [{"name": "Football", "competitions": [{"id": 4242, "name": "Liga"}]}]}
+SPORTS_PAYLOAD = {"data": {"children": [{"id": 1, "title": "Football", "type": "SPORT", "children": [{"id": 4242, "title": "Liga", "type": "COMPETITION"}]}]}}
 
 
 def site(routes, **kw):
@@ -116,9 +116,9 @@ def test_url_shown_without_query_values():
 def test_json_analysis_and_id_discovery():
     assert d.analyse_json(ODDS_PAYLOAD) == (3, 1)
     assert d.analyse_json({"odds": [True, 0.5, "1.9"], "price": 5000}) == (0, 0)  # bool, <1, string, >1000 ignored
-    assert d.find_id(SPORTS_PAYLOAD, under=("competition",)) == 4242
-    assert d.find_id(SPORTS_PAYLOAD, under=("nothing",)) is None
-    assert d.find_id(ODDS_PAYLOAD, needs_keys=frozenset({"namefull"})) == 77
+    assert d.find_id(SPORTS_PAYLOAD, where=d._is_competition) == 4242
+    assert d.find_id({"data": {"children": [{"id": 1, "type": "SPORT"}]}}, where=d._is_competition) is None
+    assert d.find_id(ODDS_PAYLOAD, where=d._is_match) == 77
 
 
 # ------------------------------------------------------------------ the probe: stop rules
@@ -192,7 +192,7 @@ def test_cookies_required_detected():
 
 
 def test_missing_ids_skip_dependent_probes_without_requests():
-    routes = {"/": Resp(200, text="home", ctype="text/html"), "/rest/offer/v4/sports": Resp(200, body={"sports": []})}
+    routes = {"/": Resp(200, text="home", ctype="text/html"), "/rest/offer/v4/sports": Resp(200, body={"data": {"children": []}})}
     report, sessions, _ = site(routes)
     skipped = [p for p in report.probes if p.verdict == d.SKIPPED]
     assert {p.label for p in skipped} == {"competition matches", "match community stats"}
@@ -218,7 +218,7 @@ def test_report_never_contains_cookie_values_or_query_values():
     text = d.render(d.site_to_report(report))
     assert "SECRETCOOKIE" not in text
     assert "cookies set on an anonymous home-page visit: 3 (names/values not shown)" in text
-    assert "fulltext=..." in text and "slovan" not in text
+    assert "searchText=..." in text and "slovan" not in text
 
 
 def test_session_sends_an_honest_user_agent():
@@ -299,3 +299,53 @@ def test_cli_command(capsys):
     assert cli.main(["diagnostics"]) == 2 and "usage: diagnostics" in capsys.readouterr().out
     assert cli.main(["diagnostics", "roobet"]) == 1 and "NOT_IMPLEMENTED" in capsys.readouterr().out
     assert cli.main(["diagnostics", "nonsense"]) == 2
+
+
+# ------------------------------------------------------------------ the documented flow + saving public responses
+def test_probes_follow_the_documented_parameter_names():
+    routes = {"/": Resp(200, text="home", ctype="text/html")}
+    _, sessions, _ = site(routes)
+    seen = {c[1].split(".sk")[1]: c[2] for c in sessions[0].calls}
+    assert seen["/rest/offer/v2/search"] == {"searchText": "slovan", "includePrematch": "true", "includeResults": "false"}
+    assert "/rest/offer/v1/competitions/top" in seen and "/rest/offer/v4/sports" in seen
+
+
+def test_competition_id_is_also_found_from_the_top_competitions_probe():
+    routes = {
+        "/": Resp(200, text="home", ctype="text/html"),
+        "/rest/offer/v1/competitions/top": Resp(200, body=SPORTS_PAYLOAD),
+        "/rest/offer/v3/sports/COMPETITION/4242/matches": Resp(200, body=ODDS_PAYLOAD),
+    }
+    _, sessions, _ = site(routes)
+    assert any(c[1].endswith("/COMPETITION/4242/matches") for c in sessions[0].calls)
+
+
+def test_save_writes_only_public_bodies_and_never_cookies(tmp_path):
+    routes = {"/": Resp(200, text="home", ctype="text/html"), "/rest/offer/v2/offer": Resp(200, body=ODDS_PAYLOAD),
+              "/rest/offer/v4/sports": Resp(403, text="x", ctype="text/html")}
+    report, _, _ = site(routes, cookies=2)
+    # the 403 stopped the probe before the offer endpoint: nothing to save, and it must say so
+    assert d.save_responses(report, tmp_path) == ["nothing saved: no probe returned JSON data"]
+    routes["/rest/offer/v4/sports"] = Resp(200, body=SPORTS_PAYLOAD)
+    report, _, _ = site(routes, cookies=2)
+    lines = d.save_responses(report, tmp_path / "out")
+    names = sorted(p.name for p in (tmp_path / "out").iterdir())
+    assert names == ["tipsport_offer.json", "tipsport_sports.json"]
+    assert json.loads((tmp_path / "out" / "tipsport_offer.json").read_text()) == ODDS_PAYLOAD
+    assert all("SECRETCOOKIE" not in p.read_text() for p in (tmp_path / "out").iterdir())
+    assert lines[-1].startswith("saved files hold public response bodies only")
+
+
+def test_save_skips_oversized_responses(tmp_path, monkeypatch):
+    monkeypatch.setattr(d, "MAX_SAVE_BYTES", 10)
+    routes = {"/": Resp(200, text="home", ctype="text/html"), "/rest/offer/v4/sports": Resp(200, body=SPORTS_PAYLOAD)}
+    report, _, _ = site(routes)
+    lines = d.save_responses(report, tmp_path)
+    assert lines[0].startswith("not saved (over") and not list(tmp_path.iterdir())
+
+
+def test_run_with_save_dir_end_to_end(tmp_path):
+    lines = []
+    routes = {"/": Resp(200, text="home", ctype="text/html"), "/rest/offer/v2/offer": Resp(200, body=ODDS_PAYLOAD)}
+    d.run("tipsport", out=lines.append, session_factory=lambda: Session(routes, cookies=1), sleep=lambda s: None, save_dir=str(tmp_path))
+    assert "saved tipsport_offer.json" in "\n".join(lines) and (tmp_path / "tipsport_offer.json").exists()

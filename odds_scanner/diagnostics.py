@@ -17,6 +17,7 @@ counted, URLs are shown without query values, and API keys are only reported as 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -79,13 +80,25 @@ class SiteSpec:
 
 
 def _lead_endpoints() -> tuple[Endpoint, ...]:
-    """Endpoint shapes from the older open-source Tipsport client. Leads only: they may be gone."""
+    """Endpoint shapes from the older open-source client ``stepankarlovec/tipsport`` (tipsport.cz).
+
+    Leads only: they may be gone or different on tipsport.sk / chance.sk. The documented flow is an
+    ordinary anonymous visit - GET the home page, the site hands out its own session cookie, then the
+    REST calls follow with it (a ``requests`` session does exactly this by itself).
+    """
     return (
         Endpoint("sports", "GET", "/rest/offer/v4/sports"),
-        Endpoint("offer", "POST", "/rest/offer/v2/offer", params=(("limit", "75"),), body={}),
-        Endpoint("search", "GET", "/rest/offer/v2/search", params=(("fulltext", "slovan"),)),
-        Endpoint("competition matches", "GET", "/rest/offer/v3/sports/COMPETITION/{competition_id}/matches", needs="competition_id"),
-        Endpoint("match community stats", "GET", "/rest/offer/v3/matches/{match_id}/communityStats", needs="match_id"),
+        Endpoint("top competitions", "GET", "/rest/offer/v1/competitions/top"),
+        Endpoint("offer", "POST", "/rest/offer/v2/offer", params=(("limit", "75"),),
+                 body={"results": False, "highlightAnyTime": False, "limit": 75, "fulltexts": [], "matchIds": [], "matchViewFilters": []}),
+        Endpoint("search", "GET", "/rest/offer/v2/search",
+                 params=(("searchText", "slovan"), ("includePrematch", "true"), ("includeResults", "false"))),
+        Endpoint("competition matches", "GET", "/rest/offer/v3/sports/COMPETITION/{competition_id}/matches",
+                 params=(("fromResults", "false"),), needs="competition_id"),
+        Endpoint("match community stats", "GET", "/rest/offer/v3/matches/{match_id}/communityStats",
+                 params=(("withOpportunitiesStats", "true"), ("withAnalysesStats", "false"), ("withTicketsStats", "false"),
+                         ("withMatchForumData", "false"), ("withMilestones", "false"), ("fromResults", "false")),
+                 needs="match_id"),
     )
 
 
@@ -166,30 +179,36 @@ def analyse_json(data: Any, *, node_limit: int = 200_000) -> tuple[int, int]:
     return odds, events
 
 
-def find_id(data: Any, *, under: tuple[str, ...] = (), needs_keys: frozenset[str] = frozenset(), limit: int = 50_000) -> Any:
-    """First integer ``id`` of an object that has one of ``needs_keys`` (and sits under a key in ``under``)."""
-    stack: list[tuple[Any, bool]] = [(data, not under)]
+def find_id(data: Any, *, where: Callable[[dict], bool], limit: int = 50_000) -> Any:
+    """First integer ``id`` of an object for which ``where(obj)`` is true (breadth-first)."""
+    stack: list[Any] = [data]
     seen = 0
     while stack and seen < limit:
-        node, ok = stack.pop(0)
+        node = stack.pop(0)
         seen += 1
         if isinstance(node, dict):
-            keys = {str(k).lower() for k in node}
-            if ok and isinstance(node.get("id"), int) and not isinstance(node.get("id"), bool) and (not needs_keys or needs_keys & keys):
-                return node["id"]
-            for k, v in node.items():
-                if isinstance(v, (dict, list)):
-                    stack.append((v, ok or any(u in str(k).lower() for u in under)))
+            node_id = node.get("id")
+            if isinstance(node_id, int) and not isinstance(node_id, bool) and where(node):
+                return node_id
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
         elif isinstance(node, list):
-            stack.extend((x, ok) for x in node if isinstance(x, (dict, list)))
+            stack.extend(x for x in node if isinstance(x, (dict, list)))
     return None
+
+
+def _is_competition(node: dict) -> bool:
+    return str(node.get("type", "")).upper() == "COMPETITION"
+
+
+def _is_match(node: dict) -> bool:
+    return bool(EVENT_KEYS & {str(k).lower() for k in node}) or str(node.get("type", "")).upper() == "MATCH"
 
 
 # ---------------------------------------------------------------------- one request
 def _clean_url(url: str, params: Iterable[tuple[str, str]] = ()) -> str:
     parts = urlsplit(url)
-    names = ",".join(k for k, _ in params)
-    return f"{parts.scheme}://{parts.netloc}{parts.path}" + (f"?{names}=..." if names else "")
+    names = "&".join(f"{k}=..." for k, _ in params)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}" + (f"?{names}" if names else "")
 
 
 def _redirect_chain(response: Any) -> list[str]:
@@ -320,17 +339,17 @@ def diagnose_site(
             report.stopped = f"{ep.label}: {result.verdict} - not retried, no workaround attempted"
             break
         if result.verdict in (OK_DATA, OK_NO_ODDS) and result.data is not None:
-            if ep.label == "sports":
-                ids.setdefault("competition_id", find_id(result.data, under=("competition",)))
-            if ep.label in ("offer", "search"):
-                ids.setdefault("match_id", find_id(result.data, needs_keys=frozenset({"namefull", "participants", "hometeam", "matchname"})))
+            if ep.label in ("sports", "top competitions") and ids.get("competition_id") is None:
+                ids["competition_id"] = find_id(result.data, where=_is_competition)
+            if ep.label in ("offer", "search", "competition matches") and ids.get("match_id") is None:
+                ids["match_id"] = find_id(result.data, where=_is_match)
 
     # 3. do anonymous probes also work with no cookies at all? (only checked after a success)
     first_ok = next((p for p in report.probes if p.verdict == OK_DATA), None)
     if first_ok is not None and not report.stopped and report.requests_sent < max_requests:
         ep = next(e for e in site.endpoints if e.label == first_ok.label)
         pace()
-        bare = send(session_factory(), ep, site.base)
+        bare = send(session_factory(), ep, site.base, path_vars={ep.needs: ids[ep.needs]} if ep.needs else None)
         report.requests_sent += 1
         report.cookies_required = bare.verdict != OK_DATA
         if bare.verdict in STOP_VERDICTS:
@@ -395,6 +414,38 @@ def _site_details(report: SiteReport) -> list[str]:
     lines.append(f"security challenge returned: {'YES - probe stopped, no workaround attempted' if challenged else 'no'}")
     if report.stopped:
         lines.append(f"stopped early: {report.stopped}")
+    return lines
+
+
+MAX_SAVE_BYTES = 8_000_000
+
+
+def save_responses(report: SiteReport, directory: str | os.PathLike[str]) -> list[str]:
+    """Write the JSON bodies of the successful probes to ``directory`` (for writing a parser offline).
+
+    Only the public response *bodies* are saved: never headers, cookies, request data or URLs with
+    query values. Returns human-readable lines about what was (not) saved.
+    """
+    from pathlib import Path
+    import re
+
+    target = Path(directory)
+    lines: list[str] = []
+    for probe in report.probes:
+        if probe.verdict not in (OK_DATA, OK_NO_ODDS) or probe.data is None:
+            continue
+        name = f"{report.site.key}_{re.sub(r'[^a-z0-9]+', '_', probe.label.lower()).strip('_')}.json"
+        text = json.dumps(probe.data, ensure_ascii=False)
+        if len(text.encode()) > MAX_SAVE_BYTES:
+            lines.append(f"not saved (over {MAX_SAVE_BYTES // 1_000_000} MB): {name}")
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        (target / name).write_text(text, encoding="utf-8")
+        lines.append(f"saved {name} ({len(text)} characters)")
+    if not lines:
+        lines.append("nothing saved: no probe returned JSON data")
+    else:
+        lines.append("saved files hold public response bodies only - no cookies, headers or credentials")
     return lines
 
 
@@ -470,7 +521,7 @@ def available_targets() -> list[str]:
 
 
 def run(target: str, *, out: Callable[[str], None] = print, session_factory: Callable[[], Any] = new_session,
-        sleep: Callable[[float], None] = time.sleep) -> int:
+        sleep: Callable[[float], None] = time.sleep, save_dir: str | None = None) -> int:
     """Run one diagnostic (or ``all``). Exit code 0 = reachable and usable, 1 = not usable, 2 = unknown target."""
     from odds_scanner.providers.sk import SK_PROVIDERS
 
@@ -478,7 +529,10 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
     code = 0
     for i, name in enumerate(targets):
         if name in SITES:
-            report = site_to_report(diagnose_site(SITES[name], session_factory=session_factory, sleep=sleep))
+            site_report = diagnose_site(SITES[name], session_factory=session_factory, sleep=sleep)
+            report = site_to_report(site_report)
+            if save_dir:
+                report.details += save_responses(site_report, save_dir)
         elif name in SK_PROVIDERS:
             report = check_provider(name)
         elif name in ("roobet", "stake"):
@@ -500,9 +554,10 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m odds_scanner.diagnostics", description=__doc__.split("\n\n")[0])
     ap.add_argument("target", help="all | " + " | ".join(available_targets()))
+    ap.add_argument("--save", metavar="DIR", help="save the public JSON responses of Tipsport/Chance probes to DIR")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
-    return run(args.target)
+    return run(args.target, save_dir=args.save)
 
 
 if __name__ == "__main__":  # pragma: no cover
