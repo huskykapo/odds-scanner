@@ -210,7 +210,10 @@ def test_sample_asks_for_mystake_too_when_it_is_in_the_list(tmp_path):
 
 # ------------------------------------------------------------------ Odds-API.io + error messages
 def test_oddsapiio_no_key_found_and_errors(monkeypatch):
-    assert c.check_oddsapiio(environ={}, session=Session()).status == "NO_KEY"
+    # no key: the list is tried without one first; if the service wants a key, say how to set it
+    s0 = Session(Resp(401, text="no key", ctype="text/html"))
+    r0 = c.check_oddsapiio(environ={}, session=s0)
+    assert r0.status == "NO_KEY" and "ODDSAPIIO_API_KEY" in r0.error and s0.calls[0][1] == {}
     s = Session(Resp(200, body=[{"name": "Stake"}, {"name": "Roobet"}, {"name": "Mystake"}, {"name": "Bet365"}]))
     r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=s)
     text = render(r)
@@ -295,7 +298,7 @@ def test_oddsapiio_sample_saves_files_and_reports_what_it_can_verify(tmp_path):
     assert "upcoming football events returned for Stake: 2" in text and "(requests sent: 3)" in text
     assert "Stake     mentioned in the odds answer" in text and "Roobet    NOT in the odds answer for this event" in text
     assert "odds-like numbers in the answer: 2" in text
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["oddsapiio_events.json", "oddsapiio_odds.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["oddsapiio_bookmakers.json", "oddsapiio_events.json", "oddsapiio_odds.json"]
     assert KEY not in text and all(KEY not in p.read_text() for p in tmp_path.iterdir())
 
 
@@ -311,3 +314,18 @@ def test_oddsapiio_sample_failures_and_no_save_dir(tmp_path):
     leaky = requests.ConnectionError(f"https://x?apiKey={KEY}")
     r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(leaky, leaky, leaky), sleep=lambda x: None)
     assert r.status == "UNREACHABLE" and KEY not in render(r)
+
+
+def test_oddsapiio_list_works_without_a_key_and_saves_it(tmp_path):
+    names = Resp(200, body=[{"name": "Stake"}, {"name": "Roobet"}, {"name": "Tipsport CZ"}, {"name": "Niké SK"}, {"name": "Pinnacle"}])
+    s = Session(names)
+    r = c.check_oddsapiio(environ={}, session=s, save_dir=tmp_path, sleep=lambda x: None)
+    text = render(r)
+    assert r.status == "OK" and s.calls[0][1] == {} and len(s.calls) == 1  # no key sent, no sample attempted
+    assert "FOUND: Stake" in text and "Tipsport  FOUND: Tipsport CZ" in text and "Nike      FOUND: Niké SK" in text
+    assert "this list needed no key" in text and "skipped the odds sample" in text
+    assert [p.name for p in tmp_path.iterdir()] == ["oddsapiio_bookmakers.json"]
+
+
+def test_report_covers_slovak_czech_crypto_and_sharp_groups():
+    assert {"Roobet", "Stake", "MyStake", "Tipsport", "Chance", "Fortuna", "Synot", "Nike", "DOXXbet", "Tipos", "MONACObet", "Pinnacle", "Duelbits", "1xBet"} <= set(c.TARGETS)

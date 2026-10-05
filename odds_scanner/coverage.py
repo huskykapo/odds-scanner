@@ -26,14 +26,30 @@ TIMEOUT = 20.0
 MAX_PAGES = 20
 
 TARGETS: dict[str, tuple[str, ...]] = {
+    # your accounts / crypto
     "Roobet": ("roobet",),
     "Stake": ("stake",),
     "MyStake": ("mystake",),
+    "Duelbits": ("duelbits",),
+    "BC.Game": ("bc.game", "bcgame"),
+    "1xBet": ("1xbet",),
+    "Cloudbet": ("cloudbet",),
+    "Rollbit": ("rollbit",),
+    "Vave": ("vave",),
+    "Betfury": ("betfury",),
+    # Slovak / Czech
     "Tipsport": ("tipsport",),
     "Chance": ("chance",),
     "Fortuna": ("fortuna",),
     "Synot": ("synot",),
+    "Nike": ("nike", "niké"),
+    "DOXXbet": ("doxx",),
+    "Tipos": ("tipos",),
+    "MONACObet": ("monaco",),
+    # sharp / exchange references
     "Pinnacle": ("pinnacle",),
+    "Singbet": ("singbet",),
+    "Betfair": ("betfair",),
 }
 EXCLUDE: dict[str, tuple[str, ...]] = {"Stake": ("mystake",)}  # a different brand that merely contains "stake"
 NAME_KEYS = frozenset({"name", "title", "slug", "key", "bookmaker", "bookmakername", "displayname", "display_name", "label"})
@@ -76,7 +92,7 @@ def _summarise(source: str, title: str, names: set[str], requests_sent: int, ext
     report = BookmakerReport(title, source, "OK", "200", events="n/a", markets="n/a", odds="n/a")
     report.details = [f"bookmakers visible to this key: {len(names)}   (requests sent: {requests_sent})"]
     for label, hits in found.items():
-        report.details.append(f"  {label:<9} {'FOUND: ' + ', '.join(hits[:6]) if hits else 'not in the list'}")
+        report.details.append(f"  {label:<10}{'FOUND: ' + ', '.join(hits[:6]) if hits else 'not in the list'}")
     report.details += extra
     report.details.append("listed is not the same as 'returns odds on your plan': fetch one fixture's odds before building an adapter")
     return report
@@ -365,13 +381,17 @@ def check_oddsapiio(
     """Which bookmakers can this Odds-API.io key use? (``GET /v3/bookmakers``; with ``save_dir`` also a real sample)"""
     env = os.environ if environ is None else environ
     title, source = "Odds-API.io (coverage)", ODDSAPIIO_URL
-    key = env.get("ODDSAPIIO_API_KEY")
-    if not key:
-        return _no_key(title, source, "ODDSAPIIO_API_KEY", "https://odds-api.io")
+    key = env.get("ODDSAPIIO_API_KEY") or ""
+    # The list of bookmakers may be readable without a key: try that first, so you can see
+    # what a plan could pick from BEFORE paying. If the service wants a key, say so.
     session = session or new_session()
-    response, problem, attempts = _get_retrying(session, ODDSAPIIO_URL, {"apiKey": key}, sleep)
+    response, problem, attempts = _get_retrying(session, ODDSAPIIO_URL, {"apiKey": key} if key else {}, sleep)
     if response is None:
         return _failure(title, source, "UNREACHABLE", "n/a", f"{problem}; says nothing about the service (tried {attempts} times)")
+    if response.status_code in (401, 403) and not key:
+        return BookmakerReport(
+            title, source, "NO_KEY", str(response.status_code),
+            error="the list needs a key (ODDSAPIIO_API_KEY). In PowerShell:  $env:ODDSAPIIO_API_KEY = \"YOUR-KEY\"  (never paste it into chat or a file)")
     if response.status_code != 200:
         status, error = _classify_status(response.status_code, _snippet(response, key))
         if response.status_code == 404:
@@ -383,12 +403,23 @@ def check_oddsapiio(
         return _failure(title, source, "ERROR", "200", "the answer was not JSON")
     names = bookmaker_names(data)
     extra = [
-        "on a plan with a fixed number of bookmakers (e.g. 2), you choose which ones: check Roobet/Stake/MyStake can be selected"]
+        "a plan with N bookmakers lets you SELECT N of the ones above (select/clear via their API): "
+        + ("this list needed no key" if not key else "key used")]
     sent = attempts
     if save_dir:
-        lines, used = sample_oddsapiio(save_dir, key=key, session=session, names=names, sleep=sleep)
-        extra += lines
-        sent += used
+        import json
+        from pathlib import Path
+
+        target = Path(save_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "oddsapiio_bookmakers.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        extra.append("saved oddsapiio_bookmakers.json (the bookmaker list: public information)")
+        if key:
+            lines, used = sample_oddsapiio(save_dir, key=key, session=session, names=names, sleep=sleep)
+            extra += lines
+            sent += used
+        else:
+            extra.append("no key set: skipped the odds sample (needs a key and a paid plan)")
     return _summarise(source, title, names, sent, extra)
 
 
