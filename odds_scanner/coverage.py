@@ -199,6 +199,26 @@ def find_key(data: Any, key: str, *, limit: int = 200_000) -> Any:
     return None
 
 
+MAX_SAMPLE_FIXTURES = 3  # candidates tried if one turns out to be live
+
+
+def collect_values(data: Any, key: str, *, limit: int, scan: int = 200_000) -> list[Any]:
+    """Up to ``limit`` distinct values stored under ``key`` (in document order, breadth-first)."""
+    found: list[Any] = []
+    stack, seen = [data], 0
+    while stack and seen < scan and len(found) < limit:
+        node = stack.pop(0)
+        seen += 1
+        if isinstance(node, dict):
+            value = node.get(key)
+            if isinstance(value, (str, int)) and not isinstance(value, bool) and value not in found:
+                found.append(value)
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+    return found
+
+
 def sample_oddspapi(
     save_dir: Any, *, key: str, session: Any, names: set[str], sleep: Callable[[float], None], today: Any = None,
 ) -> tuple[list[str], int]:
@@ -239,16 +259,26 @@ def sample_oddspapi(
         lines.append(f"saved {name} ({len(text)} characters; public odds data only, no key)")
 
     try:
+        # statusId 0 = not yet started: the free plan has no live access, and live is not what we scan anyway.
         fixtures = get(FIXTURES_URL, {"sportId": FOOTBALL_SPORT_ID, "from": day.isoformat(),
-                                      "to": (day + timedelta(days=3)).isoformat(), "hasOdds": "true"})
+                                      "to": (day + timedelta(days=3)).isoformat(), "hasOdds": "true", "statusId": 0})
         save("oddspapi_fixtures.json", fixtures)
         count = _count_key(fixtures, "fixtureId")
         lines.append(f"fixtures with odds in the next 3 days (football): {count}")
-        fixture_id = find_key(fixtures, "fixtureId")
-        if not isinstance(fixture_id, (str, int)):
+        candidates = collect_values(fixtures, "fixtureId", limit=MAX_SAMPLE_FIXTURES)
+        if not candidates:
             lines.append("no fixture id found in the answer: send me oddspapi_fixtures.json so I can read its structure")
             return lines, sent
-        odds = get(ODDS_URL, {"fixtureId": fixture_id, "bookmakers": ",".join(wanted), "oddsFormat": "decimal", "verbosity": 3})
+        odds = None
+        for fixture_id in candidates:
+            try:
+                odds = get(ODDS_URL, {"fixtureId": fixture_id, "bookmakers": ",".join(wanted), "oddsFormat": "decimal", "verbosity": 3})
+                break
+            except _SampleError as exc:
+                if "live" in str(exc).lower() and fixture_id != candidates[-1]:
+                    lines.append(f"fixture {fixture_id} is live (not on the free plan): trying the next one")
+                    continue
+                raise
         save("oddspapi_odds.json", odds)
         book_odds = find_key(odds, "bookmakerOdds")
         if isinstance(book_odds, dict):

@@ -163,7 +163,7 @@ def test_sample_fetches_one_fixture_saves_files_and_reports_per_bookmaker(tmp_pa
     assert "(requests sent: 3)" in text and sleeps == [c.MIN_INTERVAL, c.MIN_INTERVAL]
     fixtures_call, odds_call = s.calls[1], s.calls[2]
     assert fixtures_call[0].endswith("/v4/fixtures")
-    assert fixtures_call[1] == {"sportId": 10, "from": "2026-10-05", "to": "2026-10-08", "hasOdds": "true", "apiKey": KEY}
+    assert fixtures_call[1] == {"sportId": 10, "from": "2026-10-05", "to": "2026-10-08", "hasOdds": "true", "statusId": 0, "apiKey": KEY}
     assert odds_call[1]["fixtureId"] == "id100" and odds_call[1]["bookmakers"] == "roobet,stake,pinnacle" and odds_call[1]["oddsFormat"] == "decimal"
     assert "fixtures with odds in the next 3 days (football): 2" in text
     assert "pinnacle  odds returned (2 markets)" in text and "stake     odds returned (1 markets)" in text
@@ -250,3 +250,31 @@ def test_sample_retries_a_transient_500_and_reports_the_service_message(tmp_path
 
 def test_all_target_includes_no_aggregator_and_names_are_listed():
     assert {"oddspapi", "sportmonks", "oddsapiio"} <= set(d.available_targets())
+
+
+LIVE = lambda: Resp(403, text='{"error":{"message":"No bookmakers with live access found.","code":"RESTRICTED_ACCESS","details":"Fixture you have requested is live."}}', ctype="application/json")  # noqa: E731
+
+
+def test_sample_asks_only_for_not_started_fixtures_and_skips_a_live_one(tmp_path):
+    s = Session(LIST, FIXTURES, LIVE(), ODDS)
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None, today=date(2026, 10, 5))
+    text = render(r)
+    assert s.calls[1][1]["statusId"] == 0
+    assert [call[1]["fixtureId"] for call in s.calls[2:]] == ["id100", "id101"]  # live one skipped, next one tried
+    assert "fixture id100 is live" in text and "pinnacle  odds returned" in text and "sample failed" not in text
+
+
+def test_sample_gives_up_after_the_candidates_and_other_403s_are_not_skipped(tmp_path):
+    fixtures = Resp(200, body={"data": [{"fixtureId": f"id{i}"} for i in range(5)]})
+    s = Session(LIST, fixtures, LIVE(), LIVE(), LIVE())
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None, today=date(2026, 10, 5))
+    assert len(s.calls) == 5 and "sample failed: HTTP 403" in render(r)  # 3 candidates max
+    other = Resp(403, text='{"message": "plan does not include this endpoint"}', ctype="application/json")
+    s = Session(LIST, FIXTURES, other)
+    c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None, today=date(2026, 10, 5))
+    assert len(s.calls) == 3  # not a live problem: no point trying another fixture
+
+
+def test_collect_values():
+    assert c.collect_values({"a": [{"fixtureId": "x"}, {"fixtureId": "y"}, {"fixtureId": "x"}]}, "fixtureId", limit=5) == ["x", "y"]
+    assert c.collect_values({"a": 1}, "fixtureId", limit=3) == []
