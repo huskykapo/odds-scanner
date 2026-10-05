@@ -59,8 +59,20 @@ Source of the endpoint details and sample responses: `sample_data/sk/README.md`.
 | Known restrictions | if the diagnostic returns BLOCKED the approach stops here. No cookie reuse, header tricks, headless-browser evasion or retries |
 | Fallback | an odds aggregator that licenses Tipsport data (not yet researched), or skip |
 
-**Next action:** run `py start.py diagnostics tipsport` on the scanner machine and send the output.
-An adapter is built only if it reports WORKING or PARTIAL with a normal public JSON endpoint.
+**What the older open-source client documents** (`stepankarlovec/tipsport`, tipsport.cz, PHP; read 2026-10-05):
+GET the home page and read the site's own `JSESSIONID` cookie, then call `GET /rest/offer/v4/sports` (tree in
+`data.children`), `GET /rest/offer/v1/competitions/top`, `POST /rest/offer/v2/offer` (JSON keys `results,
+highlightAnyTime, limit, type, id, fulltexts, matchIds, matchViewFilters`), `GET /rest/offer/v2/search?searchText=
+&includePrematch=true&includeResults=false` (key `results`), `GET /rest/offer/v3/sports/COMPETITION/{id}/matches?
+fromResults=false`, `GET /rest/offer/v3/matches/{id}/communityStats?...`. It sets no User-Agent and no login. It does
+**not** show what a match or an odds entry looks like, so a parser cannot be written from it.
+
+**Why no adapter yet:** writing a parser against an unseen structure risks showing wrong prices as arbitrage.
+`py start.py diagnostics tipsport --save tipsport_samples` stores the public JSON bodies of the working probes
+(never cookies/headers); the adapter is then written and tested against that real data.
+
+**Next action:** run `py start.py diagnostics tipsport --save tipsport_samples` on the scanner machine and send
+the output (and the saved files, if any). An adapter is built only if it reports WORKING or PARTIAL.
 
 ## Chance SK  (priority 2)
 
