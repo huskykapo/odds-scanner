@@ -93,7 +93,24 @@ def _no_key(title: str, source: str, env: str, where: str) -> BookmakerReport:
     )
 
 
-def _classify_status(status: int) -> tuple[str, str]:
+def _snippet(response: Any, secret: str) -> str:
+    """The service's own error text (first ~160 chars), with the key removed and HTML ignored."""
+    try:
+        text = response.text if isinstance(response.text, str) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+    text = " ".join(text.split())
+    if not text or text.lstrip().startswith("<"):
+        return ""
+    return text.replace(secret, "***")[:160]
+
+
+def _classify_status(status: int, detail: str = "") -> tuple[str, str]:
+    status_text, error = _classify_status_base(status)
+    return status_text, error + (f" - service says: {detail}" if detail else "")
+
+
+def _classify_status_base(status: int) -> tuple[str, str]:
     if status in (401, 403):
         return "AUTH_FAILED", "the aggregator rejected the key (wrong, expired or not allowed for this endpoint)"
     if status == 429:
@@ -120,7 +137,7 @@ def check_oddspapi(
     except requests.RequestException as exc:
         return _failure(title, source, "UNREACHABLE", "n/a", f"no HTTP answer ({type(exc).__name__}); says nothing about the service")
     if response.status_code != 200:
-        status, error = _classify_status(response.status_code)
+        status, error = _classify_status(response.status_code, _snippet(response, key))
         return _failure(title, source, status, str(response.status_code), error)
     try:
         data = response.json()
@@ -265,7 +282,7 @@ def check_sportmonks(
         except requests.RequestException as exc:
             return _failure(title, source, "UNREACHABLE", "n/a", f"no HTTP answer ({type(exc).__name__}); says nothing about the service")
         if response.status_code != 200:
-            status, error = _classify_status(response.status_code)
+            status, error = _classify_status(response.status_code, _snippet(response, token))
             return _failure(title, source, status, str(response.status_code), error)
         try:
             data = response.json()
@@ -280,3 +297,32 @@ def check_sportmonks(
     else:
         note.append(f"stopped after {MAX_PAGES} pages; the list may be longer")
     return _summarise(source, title, names, pages, note)
+
+
+# ---------------------------------------------------------------------- Odds-API.io
+ODDSAPIIO_URL = "https://api.odds-api.io/v3/bookmakers"
+
+
+def check_oddsapiio(*, environ: Any = None, session: Any = None) -> BookmakerReport:
+    """Which bookmakers can this Odds-API.io key use? (``GET /v3/bookmakers``, one request)"""
+    env = os.environ if environ is None else environ
+    title, source = "Odds-API.io (coverage)", ODDSAPIIO_URL
+    key = env.get("ODDSAPIIO_API_KEY")
+    if not key:
+        return _no_key(title, source, "ODDSAPIIO_API_KEY", "https://odds-api.io")
+    session = session or new_session()
+    try:
+        response = session.get(ODDSAPIIO_URL, params={"apiKey": key}, timeout=TIMEOUT)
+    except requests.RequestException as exc:
+        return _failure(title, source, "UNREACHABLE", "n/a", f"no HTTP answer ({type(exc).__name__}); says nothing about the service")
+    if response.status_code != 200:
+        status, error = _classify_status(response.status_code, _snippet(response, key))
+        if response.status_code == 404:
+            error += " (the endpoint may have changed: tell the developer)"
+        return _failure(title, source, status, str(response.status_code), error)
+    try:
+        data = response.json()
+    except ValueError:
+        return _failure(title, source, "ERROR", "200", "the answer was not JSON")
+    return _summarise(source, title, bookmaker_names(data), 1, [
+        "on a plan with a fixed number of bookmakers (e.g. 2), you choose which ones: check Roobet/Stake/MyStake can be selected"])

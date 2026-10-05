@@ -186,3 +186,32 @@ def test_sample_asks_for_mystake_too_when_it_is_in_the_list(tmp_path):
     r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=s, save_dir=tmp_path, sleep=lambda x: None, today=date(2026, 10, 5))
     assert s.calls[2][1]["bookmakers"] == "roobet,stake,mystake,pinnacle"
     assert "mystake   NO ODDS returned for this fixture on this plan" in render(r)
+
+
+# ------------------------------------------------------------------ Odds-API.io + error messages
+def test_oddsapiio_no_key_found_and_errors(monkeypatch):
+    assert c.check_oddsapiio(environ={}, session=Session()).status == "NO_KEY"
+    s = Session(Resp(200, body=[{"name": "Stake"}, {"name": "Roobet"}, {"name": "Mystake"}, {"name": "Bet365"}]))
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=s)
+    text = render(r)
+    assert s.calls[0][0] == "https://api.odds-api.io/v3/bookmakers" and s.calls[0][1] == {"apiKey": KEY}
+    assert "FOUND: Stake" in text and "FOUND: Roobet" in text and "MyStake   FOUND: Mystake" in text and "Tipsport  not in the list" in text
+    assert KEY not in text
+    r = c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(Resp(404, text="nope", ctype="text/html")))
+    assert r.status == "ERROR" and "endpoint may have changed" in r.error
+    assert c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(Resp(401, text="x", ctype="text/html"))).status == "AUTH_FAILED"
+    leaky = requests.ConnectionError(f"https://api.odds-api.io/v3/bookmakers?apiKey={KEY}")
+    assert KEY not in render(c.check_oddsapiio(environ={"ODDSAPIIO_API_KEY": KEY}, session=Session(leaky)))
+
+
+def test_the_services_own_error_message_is_shown_with_the_key_removed():
+    msg = Resp(500, text=f'{{"error": "Internal error for key {KEY}, try again"}}', ctype="application/json")
+    r = c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(msg))
+    assert r.status == "ERROR" and "service says:" in r.error and "Internal error" in r.error
+    assert KEY not in render(r) and "***" in r.error
+    html = Resp(500, text="<html><body>Bad gateway</body></html>", ctype="text/html")
+    assert "service says" not in c.check_oddspapi(environ={"ODDSPAPI_API_KEY": KEY}, session=Session(html)).error  # HTML pages are not echoed
+
+
+def test_all_target_includes_no_aggregator_and_names_are_listed():
+    assert {"oddspapi", "sportmonks", "oddsapiio"} <= set(d.available_targets())

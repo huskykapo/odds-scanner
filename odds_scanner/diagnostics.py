@@ -500,7 +500,7 @@ def check_odds_api() -> BookmakerReport:
 
 
 # ---------------------------------------------------------------------- rendering / entry point
-AGGREGATORS = ("oddspapi", "sportmonks")  # key-based coverage checks; only run when named, never by "all"
+AGGREGATORS = ("oddspapi", "sportmonks", "oddsapiio")  # key-based coverage checks; only run when named, never by "all"
 
 REPORT_FIELDS = (
     ("BOOKMAKER", "bookmaker"), ("SOURCE", "source"), ("STATUS", "status"), ("HTTP/API STATUS", "http_status"),
@@ -544,7 +544,8 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
         elif name in AGGREGATORS:
             from odds_scanner import coverage
 
-            report = coverage.check_oddspapi(save_dir=save_dir) if name == "oddspapi" else coverage.check_sportmonks()
+            report = (coverage.check_oddspapi(save_dir=save_dir) if name == "oddspapi"
+                      else coverage.check_oddsapiio() if name == "oddsapiio" else coverage.check_sportmonks())
         else:
             out(f"unknown bookmaker {name!r}; choose one of: all, {', '.join(available_targets())}")
             return 2

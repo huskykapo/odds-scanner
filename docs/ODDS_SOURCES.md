@@ -162,6 +162,25 @@ Listed does not prove the free plan returns their odds. Next test: `py start.py 
 (2 requests of the 250/month): fetches one football fixture with Roobet/Stake/MyStake/Pinnacle odds and saves the
 responses so the adapter can be written from the real format.
 
+### Value comparison for a continuous Roobet / Stake / MyStake feed (research 2026-10-05; advertised, NOT tested)
+
+Needed: the three crypto books, fresh enough for arbs that last minutes, at a price that a small bankroll can carry.
+
+| Provider | Carries Roobet/Stake/MyStake? | Price (advertised) | Notes |
+|---|---|---|---|
+| **OddsPapi** | Roobet, Stake, MyStake **confirmed in the owner's own bookmaker list** (720 visible) | free 250 req/month; Pro ~USD 49/month (the owner reported it as expensive: confirm the plan seen) | `/v4/odds` takes ONE `fixtureId` per call, so scanning many matches costs many requests: check for a bulk endpoint and the Pro request cap before paying |
+| **Odds-API.io** | its "international bookmakers" page lists Betfury, **MyStake, Roobet, Stake** | free: 2 "recreational" bookmakers, 100 req/h (new free keys reported paused); Solo ~GBP 49 / USD 65 (2 bookmakers), higher tiers add bookmakers; 5,000 req/h on paid plans | priced per *number of bookmakers*, which suits "only the 3 foreign books"; a multi-odds call returns up to 10 events per request; has its own arbitrage endpoint |
+| odds-api.net | not confirmed | from USD 30/month (50k requests) | arbitrage/EV feeds on paid plans |
+| The Odds API | **no** crypto/sharp books | free 500 credits; USD 30 for 20k | cheap but lacks the target books |
+| SharpAPI | not confirmed | free 2 sportsbooks (60 s delay); USD 79 for 5 | mostly US sportsbooks |
+| SportsGameOdds | not confirmed | USD 99 for 77 bookmakers | |
+
+Open questions that decide "worth it" (none answered yet): freshness/latency of the crypto books' prices on each feed;
+how many requests a full scan needs (one fixture per call vs many events per call); whether Roobet and Stake can
+be the two bookmakers of a 2-bookmaker plan (Odds-API.io) or fit the free slot.
+
+`py start.py diagnostics oddsapiio` (key in `ODDSAPIIO_API_KEY`) lists what an Odds-API.io key can use.
+
 ## Cost outlook
 
 | Goal | Realistic option |
