@@ -8,7 +8,20 @@ a placeholder character, other players visible, and a small test level with a cl
 
 ---
 
-## 1. One-time setup (Windows)
+## 0. Quickest way: one-paste installer (no tools needed)
+
+`install/SkyboundInstaller.luau` is a single script that creates all Skybound scripts inside the
+place you have open in Studio. It changes nothing else, and Ctrl+Z undoes it.
+
+- **By hand:** open the file on GitHub → *Raw* → select all, copy. In Studio: View → Command Bar,
+  paste, press Enter. The Output window prints `[Skybound] Installed 23 instances`. Press Play.
+- **Through Studio's MCP server** (Assistant Settings → MCP Servers): a Claude running on your PC
+  (Claude Desktop or Claude Code) can run this file's contents with its "run code" tool.
+
+Re-run it after each update to get the newest code (it replaces the old Skybound scripts).
+After changing anything in `src/`, regenerate it with `python tools/make_installer.py`.
+
+## 1. One-time setup for live sync (Windows)
 
 You need three things: **Rojo** (copies these files into Studio), the **Rojo Studio plugin**, and
 an editor. The easiest path for a beginner is VS Code:
