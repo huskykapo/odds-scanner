@@ -1,0 +1,8 @@
+# Roblox place files and generated files
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.lock
+sourcemap.json
+roblox.yml

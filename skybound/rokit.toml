@@ -1,0 +1,5 @@
+# Tool versions for this project. Install Rokit (https://github.com/rojo-rbx/rokit), then run
+# `rokit install` in this folder to get exactly these versions.
+[tools]
+rojo = "rojo-rbx/rojo@7.7.1"
+lune = "lune-org/lune@0.11.0"
