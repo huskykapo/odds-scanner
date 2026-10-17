@@ -17,6 +17,8 @@ from odds_scanner.discovery import DiscoveryCache
 from odds_scanner.engine import DetailSettings, LiveEngine, Source
 from odds_scanner.errors import ConfigError, OddsScannerError
 from odds_scanner.matching import MatchSettings
+from odds_scanner.adaptive import AdaptiveSettings
+from odds_scanner.opportunities import ValidationSettings
 from odds_scanner.notifiers import ConsoleNotifier, DedupeCache, Notifier, TelegramNotifier, format_arb_table
 from odds_scanner.providers import OddsProvider, ReplayProvider, TheOddsApiProvider
 from odds_scanner.providers.sk import SK_PROVIDERS
@@ -55,7 +57,8 @@ def build_provider(cfg: Config) -> tuple[OddsProvider, Config]:
     )
 
 
-def build_notifiers(cfg: Config) -> list[Notifier]:
+def build_notifiers(cfg: Config, *, own_dedupe: bool = True) -> list[Notifier]:
+    """``own_dedupe=False`` under the live engine: its opportunity registry decides what is announced."""
     n = cfg.notifications
     notifiers: list[Notifier] = []
     if n.console:
@@ -65,10 +68,11 @@ def build_notifiers(cfg: Config) -> list[Notifier]:
             TelegramNotifier.from_env(
                 n.telegram.token_env,
                 n.telegram.chat_id_env,
-                dedupe=DedupeCache(timedelta(minutes=n.dedupe_ttl_minutes)),
+                dedupe=DedupeCache(timedelta(minutes=n.dedupe_ttl_minutes)) if own_dedupe else None,
                 currency=cfg.currency,
                 max_per_cycle=n.max_per_cycle,
                 min_profit_percent=n.telegram.min_profit_percent,
+                dashboard_url=n.dashboard_url,
             )
         )
     return notifiers
@@ -82,6 +86,12 @@ def build_logs(cfg: Config) -> list[ArbLog]:
     if s.backend in ("sqlite", "both"):
         logs.append(SqliteArbLog(s.sqlite_path))
     return logs
+
+
+def _window(text: str | None):
+    from odds_scanner.schedule import parse_window
+
+    return parse_window(text) if text else None
 
 
 def build_sources(cfg: Config) -> list[Source]:
@@ -100,7 +110,7 @@ def build_sources(cfg: Config) -> list[Source]:
             sources.append(Source(
                 name, "The Odds API", provider, sports, sc.poll_interval_seconds,
                 fetch_kwargs={"regions": cfg.regions, "markets": cfg.markets, "bookmakers": cfg.bookmakers},
-                quota_floor=cfg.quota.stop_below,
+                quota_floor=cfg.quota.stop_below, active_hours=_window(sc.active_hours),
             ))
             continue
         cls = SK_PROVIDERS[name]
@@ -116,7 +126,8 @@ def build_sources(cfg: Config) -> list[Source]:
         skipped = [s for s in sports if not sk.supports(s)]
         if skipped:
             log.info("%s: no site id known yet for %s", cls.title, ", ".join(skipped))
-        sources.append(Source(name, cls.title, sk, supported, sc.poll_interval_seconds, homepage=cls.homepage, skipped_sports=skipped))
+        sources.append(Source(name, cls.title, sk, supported, sc.poll_interval_seconds, homepage=cls.homepage,
+                              skipped_sports=skipped, active_hours=_window(sc.active_hours)))
     return sources
 
 
@@ -135,6 +146,23 @@ def finder_settings(cfg: Config) -> FinderSettings:
     )
 
 
+def adaptive_settings(cfg: Config) -> AdaptiveSettings:
+    a = cfg.adaptive_polling
+    return AdaptiveSettings(a.enabled, a.soon_hours, a.soon_factor, a.far_hours, a.far_factor, a.min_interval_seconds, a.max_interval_seconds)
+
+
+def validation_settings(cfg: Config) -> ValidationSettings:
+    v = cfg.validation
+    return ValidationSettings(
+        max_odds_age=timedelta(seconds=v.max_odds_age_seconds),
+        confirm_polls=int(v.confirm_polls),
+        renotify_roi_delta=v.renotify_roi_delta,
+        renotify_min_interval=timedelta(seconds=v.renotify_min_interval_seconds),
+        gone_after=timedelta(seconds=v.gone_after_seconds),
+        verify_above_percent=cfg.verify_above_percent,
+    )
+
+
 def build_engine(cfg: Config) -> LiveEngine:
     sources = build_sources(cfg)
     if not sources:
@@ -146,8 +174,10 @@ def build_engine(cfg: Config) -> LiveEngine:
         match_settings=MatchSettings.from_raw_aliases(
             m.aliases, time_tolerance=timedelta(minutes=m.time_tolerance_minutes), threshold=m.name_threshold
         ),
-        notifiers=build_notifiers(cfg),
+        notifiers=build_notifiers(cfg, own_dedupe=False),
         logs=build_logs(cfg),
+        validation=validation_settings(cfg),
+        adaptive=adaptive_settings(cfg),
         dedupe_ttl=timedelta(minutes=cfg.notifications.dedupe_ttl_minutes),
         currency=cfg.currency,
         detail_settings=DetailSettings(
@@ -193,6 +223,8 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
     from odds_scanner.dashboard import Dashboard, lan_ip
 
     if once:
+        # A one-shot scan cannot get a second poll to confirm anything: skip that step, results are a snapshot.
+        engine.registry.settings = replace(engine.registry.settings, confirm_polls=0)
         try:
             arbs = engine.run_once()
         finally:
@@ -210,7 +242,7 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
         try:
             dash = Dashboard(
                 engine.snapshot, cfg.dashboard.host, cfg.dashboard.port,
-                get_history=history_reader(cfg), get_near_misses=engine.near_miss_snapshot,
+                get_history=history_reader(cfg), get_near_misses=engine.near_miss_snapshot, recheck=engine.recheck,
             )
         except OSError as exc:
             raise ConfigError(f"cannot open the dashboard on port {cfg.dashboard.port}: {exc}") from exc
@@ -228,7 +260,10 @@ def run_live(cfg: Config, engine: LiveEngine, *, once: bool, dashboard: bool) ->
     engine.start_discovery(DiscoveryCache())
     log.info("polling %s - press Ctrl+C to stop", ", ".join(f"{s.title} ({','.join(s.sports) or '-'})" for s in engine.sources))
     try:
-        threading.Event().wait()  # until Ctrl+C
+        # Short waits in a loop: on Windows a single wait() with no timeout cannot be interrupted by Ctrl+C.
+        forever = threading.Event()
+        while not forever.wait(0.5):
+            pass
     except KeyboardInterrupt:
         log.info("stopping")
     finally:
@@ -245,9 +280,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         epilog="commands: run (default) - scan and serve the dashboard; probe - check each bookmaker endpoint once; "
         "probe-fortuna - check whether Fortuna's football page contains match data; "
         "telegram-test - guided Telegram alert setup and test message; "
+        "diagnostics <bookmaker|all> - read-only check of one bookmaker's data source; "
+        "stats - when (before kick-off) and between which bookmakers your logged arbs appeared; "
         "capture - save each bookmaker's raw responses into a ZIP (to add new bet types).",
     )
-    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture"))
+    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture", "diagnostics", "stats"))
+    ap.add_argument("target", nargs="?", help="for diagnostics: all | tipsport | chance | roobet | stake | <any working bookmaker>")
     ap.add_argument("-c", "--config", default="config.yaml", help="path to config file (default: %(default)s)")
     ap.add_argument("--once", action="store_true", help="scan once and exit instead of polling forever")
     ap.add_argument("--no-dashboard", action="store_true", help="do not start the web dashboard")
@@ -256,6 +294,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--bankroll", type=float, help="override bankroll from config")
     ap.add_argument("--min-profit", type=float, metavar="PCT", help="override min profit %% threshold from config")
     ap.add_argument("--log-level", help="override log level (DEBUG, INFO, WARNING, ...)")
+    ap.add_argument("--save", metavar="DIR", help="diagnostics tipsport|chance: save the public JSON responses to DIR")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return ap.parse_args(argv)
 
@@ -278,6 +317,14 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command == "diagnostics":
+        from odds_scanner.diagnostics import available_targets, run as run_diagnostics
+
+        setup_logging(args.log_level or "WARNING")
+        if not args.target:
+            print("usage: diagnostics <bookmaker>   where bookmaker is one of: all, " + ", ".join(available_targets()))
+            return EXIT_CONFIG
+        return run_diagnostics(args.target, save_dir=args.save)
     if args.command == "probe-fortuna":
         from odds_scanner.probe import probe_fortuna
 
@@ -300,6 +347,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             finally:
                 for src in sources:
                     src.provider.close()
+        if args.command == "stats":
+            from odds_scanner.stats import run as run_stats
+
+            return run_stats(cfg)
         if args.command == "telegram-test":
             from odds_scanner.notifiers.telegram_setup import check_telegram
 

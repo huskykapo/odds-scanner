@@ -18,6 +18,7 @@ from odds_scanner.errors import BlockedError, ProviderError
 from odds_scanner.matching import match_events
 from odds_scanner.models import BookmakerOdds, Event, MarketOdds, Outcome
 from odds_scanner.notifiers import Notifier
+from odds_scanner.opportunities import ValidationSettings
 from odds_scanner.probe import probe, probe_fortuna
 from odds_scanner.providers.base import FetchResult, OddsProvider
 from odds_scanner.providers.sk import MonacobetProvider, NikeProvider
@@ -87,8 +88,7 @@ class Fixed(OddsProvider):
 
 
 class Recorder(Notifier, ArbLog):
-    def __init__(self, dedupes=False):
-        self.handles_dedupe = dedupes
+    def __init__(self):
         self.batches = []
 
     def notify(self, arbs):
@@ -110,13 +110,13 @@ def mono_nike_sources():
 
 
 def test_engine_finds_arb_notifies_and_logs_new_arbs_once():
-    console, telegram, csvlog = Recorder(), Recorder(dedupes=True), Recorder()
-    eng = engine(*mono_nike_sources(), notifiers=[console, telegram], logs=[csvlog])
+    console, telegram, csvlog = Recorder(), Recorder(), Recorder()
+    eng = engine(*mono_nike_sources(), notifiers=[console, telegram], logs=[csvlog], validation=ValidationSettings(confirm_polls=0))
     eng.run_once()
     eng.analyze()  # same arb again
-    assert len(console.batches) == 1 and len(console.batches[0]) == 1  # only new arbs
+    assert len(console.batches) == 1 and len(console.batches[0]) == 1  # announced once
     assert len(csvlog.batches) == 1  # logged once
-    assert len(telegram.batches) == 2  # gets every current arb; de-dupes itself
+    assert len(telegram.batches) == 1  # every notifier is told once; the registry de-duplicates
     assert eng.states["nike"].status == "ok" and eng.states["nike"].events == 2
     assert eng.stats.multi_bookmaker_events == 1
 

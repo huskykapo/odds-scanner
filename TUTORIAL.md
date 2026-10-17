@@ -78,6 +78,9 @@ Very useful while arbs are rare: it proves the scanner is alive and shows where 
 
 ## 4. How to act on an arb (carefully)
 
+0. Press **RECHECK ODDS** on the card first. It re-fetches the current odds of just those bookmakers and
+   tells you 🟢 still available / 🔴 no longer available / ⚪ could not confirm. Only continue on 🟢.
+   (The **OPEN <BOOKMAKER>** buttons just open the bookmaker's site; nothing is ever bet for you.)
 1. Look at the **price age** on each leg. Old (red) prices are risky.
 2. Open **every** bookmaker in the card (the names are links) and **find the match**.
 3. Check that the **odds are still the same** (or better) on **every** bookmaker. If any one changed, skip it.

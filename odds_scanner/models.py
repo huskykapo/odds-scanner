@@ -95,10 +95,31 @@ class Arbitrage:
     verify_manually: bool = False  # suspiciously high profit: probably a pricing error or stale odds
     home_team: str | None = None
     away_team: str | None = None
+    # Filled in by the opportunity registry (see opportunities.py); empty for a raw finder result.
+    confidence: int | None = None  # 0-100, deterministic heuristic
+    confidence_label: str = ""  # HIGH / MEDIUM / LOW
+    status: str = ""  # PENDING / VERIFIED / FAILED
 
     @property
     def bookmakers(self) -> tuple[str, ...]:
         return tuple(leg.bookmaker_title for leg in self.legs)
+
+    @property
+    def fingerprint(self) -> str:
+        """The opportunity: event + market + line + which bookmaker is used for which outcome.
+
+        Odds are NOT part of it, so +2.84 % -> +2.90 % -> +2.75 % is one opportunity. A different
+        bookmaker for any outcome is different bet instructions, hence a different opportunity.
+        """
+        return f"{self.identity}/" + "|".join(f"{leg.outcome}@{leg.bookmaker_key}" for leg in self.legs)
+
+    @property
+    def odds_age_seconds(self) -> float | None:
+        """Age of the OLDEST leg price when the arb was found (None if a price has no timestamp)."""
+        stamps = [leg.odds_updated for leg in self.legs]
+        if not stamps or any(t is None for t in stamps):
+            return None
+        return max(0.0, (self.found_at - min(stamps)).total_seconds())  # type: ignore[type-var]
 
     @property
     def push_possible(self) -> bool:

@@ -65,8 +65,16 @@ class SourceConfig:
     min_request_interval_seconds: float = 1.0  # per site; values below 1 are refused
     sports: tuple[str, ...] | None = None  # None = the top-level ``sports`` list
     options: Mapping[str, Any] = field(default_factory=dict)  # provider-specific, see config.yaml
+    active_hours: str | None = None  # e.g. "08:00-23:00" local time: no polling outside it (saves metered API requests)
 
     def __post_init__(self) -> None:
+        if self.active_hours is not None:
+            from odds_scanner.schedule import parse_window
+
+            try:
+                parse_window(self.active_hours)
+            except ValueError as exc:
+                raise ConfigError(f"providers.*.active_hours: {exc}") from exc
         if self.options is None:
             object.__setattr__(self, "options", {})
         if not isinstance(self.enabled, bool):
@@ -194,15 +202,65 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
+class AdaptivePollingConfig:
+    """Poll a bookmaker faster when a match there starts soon, slower when nothing starts for a day."""
+
+    enabled: bool = True
+    soon_hours: float = 3.0  # a match starts within this -> faster
+    soon_factor: float = 0.5  # ...polling every (configured interval x this)
+    far_hours: float = 24.0  # nothing starts within this -> slower
+    far_factor: float = 2.0
+    min_interval_seconds: float = 30.0  # never faster than this (the 1 request/s per site rule still applies)
+    max_interval_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ConfigError("adaptive_polling.enabled must be true or false")
+        _positive("adaptive_polling.soon_hours", self.soon_hours)
+        _positive("adaptive_polling.far_hours", self.far_hours)
+        _positive("adaptive_polling.min_interval_seconds", self.min_interval_seconds)
+        _positive("adaptive_polling.max_interval_seconds", self.max_interval_seconds)
+        if not (isinstance(self.soon_factor, (int, float)) and 0 < self.soon_factor <= 1):
+            raise ConfigError("adaptive_polling.soon_factor must be between 0 (exclusive) and 1")
+        if not (isinstance(self.far_factor, (int, float)) and self.far_factor >= 1):
+            raise ConfigError("adaptive_polling.far_factor must be 1 or more")
+        if self.soon_hours >= self.far_hours:
+            raise ConfigError("adaptive_polling.soon_hours must be smaller than far_hours")
+        if self.min_interval_seconds > self.max_interval_seconds:
+            raise ConfigError("adaptive_polling.min_interval_seconds must not exceed max_interval_seconds")
+
+
+@dataclass(frozen=True)
 class NotificationConfig:
     console: bool = True
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     dedupe_ttl_minutes: float = 60.0  # don't re-send an identical arb within this window
     max_per_cycle: int = 10  # cap Telegram messages per poll (rest wait for the next poll)
+    dashboard_url: str | None = None  # shown as "OPEN DASHBOARD" in Telegram alerts, e.g. http://192.168.1.20:8765
 
     def __post_init__(self) -> None:
         _positive("notifications.dedupe_ttl_minutes", self.dedupe_ttl_minutes)
         _positive("notifications.max_per_cycle", self.max_per_cycle)
+        if self.dashboard_url is not None and not str(self.dashboard_url).startswith(("http://", "https://")):
+            raise ConfigError("notifications.dashboard_url must start with http:// or https://")
+
+
+@dataclass(frozen=True)
+class ValidationConfig:
+    """Checks an arbitrage must pass before it is announced, and the notify-once rules."""
+
+    max_odds_age_seconds: float = 180.0  # every leg's price must be at most this old
+    confirm_polls: int = 1  # fresh polls of EACH involved bookmaker needed to confirm it (0 = off: alert at once)
+    renotify_roi_delta: float = 1.0  # alert again if the ROI moved by this many percentage points...
+    renotify_min_interval_seconds: float = 300.0  # ...but not more often than this
+    gone_after_seconds: float = 30.0  # unseen for this long = the opportunity ended (a return is announced again)
+
+    def __post_init__(self) -> None:
+        _positive("validation.max_odds_age_seconds", self.max_odds_age_seconds)
+        _positive("validation.confirm_polls", self.confirm_polls, allow_zero=True)
+        _positive("validation.renotify_roi_delta", self.renotify_roi_delta)
+        _positive("validation.renotify_min_interval_seconds", self.renotify_min_interval_seconds, allow_zero=True)
+        _positive("validation.gone_after_seconds", self.gone_after_seconds)
 
 
 @dataclass(frozen=True)
@@ -242,6 +300,8 @@ class Config:
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     details: DetailsConfig = field(default_factory=DetailsConfig)
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
+    adaptive_polling: AdaptivePollingConfig = field(default_factory=AdaptivePollingConfig)
 
     def __post_init__(self) -> None:
         for name in ("sports", "regions", "markets"):
@@ -330,6 +390,8 @@ def config_from_dict(data: Mapping[str, Any] | None) -> Config:
             "matching": lambda v: _build(MatchingConfig, v, "matching"),
             "dashboard": lambda v: _build(DashboardConfig, v, "dashboard"),
             "details": lambda v: _build(DetailsConfig, v, "details"),
+            "validation": lambda v: _build(ValidationConfig, v, "validation"),
+            "adaptive_polling": lambda v: _build(AdaptivePollingConfig, v, "adaptive_polling"),
             "notifications": lambda v: _build(
                 NotificationConfig,
                 v,

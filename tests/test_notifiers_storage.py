@@ -188,3 +188,39 @@ def test_sqlite_log_can_be_written_from_another_thread(tmp_path, arbs):
     log_.close()
     assert errors == []
     assert sqlite3.connect(tmp_path / "t.db").execute("SELECT COUNT(*) FROM arbs").fetchone()[0] == len(arbs)
+
+
+# ------------------------------------------------------------------ Telegram: engine contract + message layout
+def test_telegram_message_follows_the_requested_layout(arbs):
+    from odds_scanner.notifiers.telegram import format_message
+
+    a = replace(arbs[0], bankroll=500.0, confidence=92, confidence_label="HIGH")
+    msg = format_message(a, "EUR", dashboard_url="http://192.168.1.20:8765")
+    for expected in ("ARBITRAGE FOUND", "Event:", "Market:", "ROI:", f"+{a.realized_profit_percent:.2f}%", "Bankroll:", "€500.00",
+                     "Stake:", "Return:", "Profit:", "Odds age:", "Confidence:", "HIGH (92/100)", "OPEN DASHBOARD", "verify every price"):
+        assert expected in msg, expected
+    for leg in a.legs:
+        assert leg.bookmaker_title in msg and f"{leg.odds:.2f}" in msg
+    assert 'href="http://192.168.1.20:8765"' in msg
+    assert "OPEN DASHBOARD" not in format_message(a, "EUR")  # link only when configured
+    assert "Confidence:" not in format_message(replace(a, confidence=None), "EUR")
+
+
+def test_telegram_returns_what_it_handled_and_leaves_failures_for_retry(arbs):
+    session = FakeSession(FakeResponse(200, {"ok": True}), FakeResponse(400, {"description": "chat not found"}))
+    n = TelegramNotifier("123:SECRET", "42", session=session, currency="EUR")  # no own dedupe under the engine
+    handled = n.notify(arbs[:3])
+    assert handled == [arbs[0]]  # the 2nd failed -> stop, 3rd untouched: both come back next cycle
+
+
+def test_telegram_threshold_skips_are_handled_not_retried(arbs):
+    n = TelegramNotifier("123:SECRET", "42", session=FakeSession(), min_profit_percent=99.0)
+    assert n.notify(arbs) == list(arbs) and n._session.calls == []
+
+
+def test_telegram_without_own_dedupe_sends_what_it_is_given(arbs):
+    session = FakeSession(*[FakeResponse(200, {"ok": True})] * 4)
+    n = TelegramNotifier("123:SECRET", "42", session=session)
+    n.notify(arbs[:1])
+    n.notify(arbs[:1])  # the engine decides what is due; the notifier does not second-guess it
+    assert len(session.calls) == 2
