@@ -13,7 +13,7 @@ import logging
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from odds_scanner.adaptive import AdaptiveSettings, adaptive_interval, soonest_start
 from odds_scanner.arbitrage import FinderSettings, analyze_events
@@ -63,6 +63,8 @@ class Source:
     note: str = ""  # shown on the dashboard instead of the "not configured" note (sport id lookup)
     current_interval: float | None = None  # what adaptive polling chose last (None = the configured interval)
     active_hours: Window | None = None  # poll only inside this local-time window (None = around the clock)
+    metered: bool = False  # every request costs quota: adaptive polling may slow it down, never speed it up
+    homepages: dict[str, str] = field(default_factory=dict)  # bookmaker key -> homepage, for multi-bookmaker sources
 
 
 @dataclass
@@ -114,6 +116,7 @@ class LiveEngine:
         detail_settings: DetailSettings | None = None,
         validation: ValidationSettings | None = None,
         adaptive: AdaptiveSettings | None = None,
+        audiences: Sequence[Iterable[str]] = (),
         local_now: Callable[[datetime], datetime] = lambda d: d.astimezone(),
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
@@ -139,6 +142,10 @@ class LiveEngine:
         self._local_now = local_now  # UTC -> the machine's local time, for active hours
         self.registry = OpportunityRegistry(validation or ValidationSettings(), settings)
         self._generations: dict[str, int] = {src.key: 0 for src in self.sources}  # successful polls per provider
+        self._book_source: dict[str, str] = {}  # bookmaker key -> source key (a source can carry several bookmakers)
+        # Bookmaker sets (e.g. one per Discord channel): arbs are also searched within each set, so a
+        # channel limited to some bookmakers gets its own best combination, not only the overall best.
+        self._audiences = [frozenset(a) for a in audiences if a]
         self.arbs: list[Arbitrage] = []  # current candidates, enriched with status/confidence
         self.stats = MatchStats()
         self.last_analysis: datetime | None = None
@@ -184,7 +191,7 @@ class LiveEngine:
                 continue
             ok += 1
             with self._lock:
-                self._snapshots[(source.key, sport)] = list(result.events)
+                self._store(source, sport, result.events)
             q = result.quota
             if source.quota_floor is not None and q is not None and q.remaining is not None and q.remaining < source.quota_floor:
                 self._finish(state, "stopped", f"API quota low ({q.remaining} requests left)", source)
@@ -209,12 +216,34 @@ class LiveEngine:
         self._changed.set()
         return delay
 
+    def _store(self, source: Source, sport: str, events: Iterable[Event]) -> None:
+        """Keep a poll's events (caller holds the lock) and remember which source quotes which bookmaker."""
+        events = list(events)
+        self._snapshots[(source.key, sport)] = events
+        for ev in events:
+            for book in ev.bookmakers:
+                self._book_source.setdefault(book.key, source.key)
+
+    def _book_generations(self) -> dict[str, int]:
+        """Successful polls per bookmaker key (= polls of the source that carries it). Caller holds the lock."""
+        gens = dict(self._generations)
+        for book, src in self._book_source.items():
+            gens.setdefault(book, self._generations.get(src, 0))
+        return gens
+
+    def _homepages(self) -> dict[str, str]:
+        pages = {k: v for s in self.sources for k, v in s.homepages.items() if v}
+        pages.update({s.key: s.homepage for s in self.sources})
+        return pages
+
     def _next_interval(self, source: Source) -> float:
         """Delay after a successful poll: shorter when this bookmaker has a match starting soon."""
         now = self._clock()
         with self._lock:
             starts = [e.commence_time for sp in source.sports for e in self._snapshots.get((source.key, sp), ())]
         seconds, reason = adaptive_interval(source.poll_interval, soonest_start(starts, now), self._adaptive)
+        if source.metered and seconds < source.poll_interval:
+            seconds, reason = source.poll_interval, "metered source: never faster than configured"
         source.current_interval = seconds
         log.debug("%s: next poll in %.0fs (%s)", source.title, seconds, reason)
         return seconds
@@ -333,13 +362,30 @@ class LiveEngine:
         merged, stats = match_events(events, self._match)
         self._plan_details(merged, now)
         candidates, near = analyze_events(merged, self._settings, now=now, near_miss_floor=self._near_floor)
+        candidates = candidates + self._audience_candidates(merged, now, {a.fingerprint for a in candidates})
         with self._lock:
-            self.registry.update(candidates, now, dict(self._generations))
+            self.registry.update(candidates, now, self._book_generations())
             arbs = [o.arb for o in self.registry.current()]
             self.arbs, self.stats, self.last_analysis = arbs, stats, now
             self.near_misses = near[: self._near_limit]
         self._publish()
         return arbs
+
+    def _audience_candidates(self, merged: list[Event], now: datetime, known: set[str]) -> list[Arbitrage]:
+        """Arbs found when only one audience's bookmakers are considered (new combinations only)."""
+        extra: list[Arbitrage] = []
+        for books in self._audiences:
+            limited = []
+            for ev in merged:
+                kept = tuple(b for b in ev.bookmakers if b.key in books)
+                if 2 <= len(kept) < len(ev.bookmakers):
+                    limited.append(replace(ev, bookmakers=kept))
+            found, _ = analyze_events(limited, self._settings, now=now)
+            for arb in found:
+                if arb.fingerprint not in known:
+                    known.add(arb.fingerprint)
+                    extra.append(arb)
+        return extra
 
     # ------------------------------------------------------------------ match pages
     def _with_details(self, event: Event) -> Event:
@@ -453,7 +499,7 @@ class LiveEngine:
         """Fetch one sport of one provider right now (same throttled client as the poll threads)."""
         result = source.provider.fetch_odds(sport, **source.fetch_kwargs)
         with self._lock:
-            self._snapshots[(source.key, sport)] = list(result.events)
+            self._store(source, sport, result.events)
             self._generations[source.key] += 1
 
     def recheck(self, fingerprint: str) -> dict[str, Any]:
@@ -475,11 +521,13 @@ class LiveEngine:
             opp.last_recheck = now
             before = opp.arb
         by_key = {s.key: s for s in self.sources}
+        with self._lock:
+            book_source = dict(self._book_source)
         refreshed: list[str] = []
         errors: list[str] = []
         done: set[tuple[str, str]] = set()
         for leg in before.legs:
-            src = by_key.get(leg.bookmaker_key)
+            src = by_key.get(leg.bookmaker_key) or by_key.get(book_source.get(leg.bookmaker_key, ""))
             if src is None:
                 errors.append(f"{leg.bookmaker_title}: not a configured source")
                 continue
@@ -525,7 +573,7 @@ class LiveEngine:
     def opportunity_dict(self, opp: Opportunity) -> dict[str, Any]:
         """One opportunity as the dashboard shows it."""
         a, rules = opp.arb, self._settings
-        homepages = {s.key: s.homepage for s in self.sources}
+        homepages = self._homepages()
         return {
             "id": a.identity,
             "fingerprint": opp.fingerprint,
@@ -598,7 +646,7 @@ class LiveEngine:
         """JSON state of the /near-misses page: the closest combinations that are not arbs (yet)."""
         with self._lock:
             near, analysed = list(self.near_misses), self.last_analysis
-        homepages = {s.key: s.homepage for s in self.sources}
+        homepages = self._homepages()
         items = [
             {
                 "id": m.identity,

@@ -19,7 +19,7 @@ SUPPORTED_MARKETS = TWO_OR_THREE_WAY_MARKETS | TWO_WAY_MARKETS
 
 PROVIDER_NAMES = ("the_odds_api", "replay")  # legacy single-provider mode (--replay)
 SK_SOURCES = ("monacobet", "doxxbet", "nike", "tipos", "synot")
-SOURCE_NAMES = SK_SOURCES + ("the_odds_api",)
+SOURCE_NAMES = SK_SOURCES + ("the_odds_api", "oddspapi")
 STORAGE_BACKENDS = ("csv", "sqlite", "both", "none")
 
 
@@ -101,6 +101,8 @@ def default_sources() -> dict[str, SourceConfig]:
         "tipos": SourceConfig(),
         "synot": SourceConfig(),
         "the_odds_api": SourceConfig(enabled=False, poll_interval_seconds=600.0, timeout_seconds=15.0, sports=("soccer_epl",)),
+        # Free plan = 250 requests a month: poll rarely (each poll is 1 request, plus a team-name lookup now and then).
+        "oddspapi": SourceConfig(enabled=False, poll_interval_seconds=1200.0, max_retries=1, sports=("football",)),
     }
 
 
@@ -202,6 +204,60 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
+class DiscordChannelConfig:
+    """One Discord channel (= one webhook). ``bookmakers``: only arbs whose every leg is at one of these
+    (empty = any bookmaker). ``must_include``: and at least one leg at one of these (empty = no such rule)."""
+
+    name: str = ""
+    webhook_env: str = ""
+    bookmakers: tuple[str, ...] = ()
+    must_include: tuple[str, ...] = ()
+    min_profit_percent: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ConfigError("notifications.discord.channels: every channel needs a name")
+        if not isinstance(self.webhook_env, str) or not self.webhook_env.strip():
+            raise ConfigError(f"notifications.discord.channels.{self.name}: webhook_env (environment variable name) is required")
+        for label in ("bookmakers", "must_include"):
+            value = getattr(self, label)
+            if value is None:
+                object.__setattr__(self, label, ())
+            elif value:
+                _str_list(f"notifications.discord.channels.{self.name}.{label}", value)
+        if self.min_profit_percent is not None:
+            _positive(f"notifications.discord.channels.{self.name}.min_profit_percent", self.min_profit_percent, allow_zero=True)
+
+
+@dataclass(frozen=True)
+class DiscordConfig:
+    enabled: bool = False
+    username: str = "Arb Scanner"
+    channels: tuple[DiscordChannelConfig, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ConfigError("notifications.discord.enabled must be true or false")
+        names = [c.name for c in self.channels]
+        if len(set(names)) != len(names):
+            raise ConfigError("notifications.discord.channels: channel names must be unique")
+        if self.enabled and not self.channels:
+            raise ConfigError("notifications.discord is enabled but no channels are listed")
+
+
+def _build_discord(data: Any) -> DiscordConfig:
+    if data is None:
+        data = {}
+    if not isinstance(data, Mapping):
+        raise ConfigError("notifications.discord must be a mapping")
+    channels = data.get("channels") or []
+    if not isinstance(channels, list):
+        raise ConfigError("notifications.discord.channels must be a list")
+    built = tuple(_build(DiscordChannelConfig, c, "notifications.discord.channels") for c in channels)
+    return _build(DiscordConfig, {**data, "channels": built}, "notifications.discord")
+
+
+@dataclass(frozen=True)
 class AdaptivePollingConfig:
     """Poll a bookmaker faster when a match there starts soon, slower when nothing starts for a day."""
 
@@ -234,6 +290,7 @@ class AdaptivePollingConfig:
 class NotificationConfig:
     console: bool = True
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     dedupe_ttl_minutes: float = 60.0  # don't re-send an identical arb within this window
     max_per_cycle: int = 10  # cap Telegram messages per poll (rest wait for the next poll)
     dashboard_url: str | None = None  # shown as "OPEN DASHBOARD" in Telegram alerts, e.g. http://192.168.1.20:8765
@@ -396,7 +453,7 @@ def config_from_dict(data: Mapping[str, Any] | None) -> Config:
                 NotificationConfig,
                 v,
                 "notifications",
-                nested={"telegram": lambda t: _build(TelegramConfig, t, "notifications.telegram")},
+                nested={"telegram": lambda t: _build(TelegramConfig, t, "notifications.telegram"), "discord": _build_discord},
             ),
         },
     )

@@ -483,10 +483,15 @@ def check_provider(name: str, *, provider: Any = None, sport: str = "football") 
 
 
 def check_unimplemented(name: str) -> BookmakerReport:
-    title = {"roobet": "Roobet", "stake": "Stake"}[name]
+    """Roobet / Stake / MyStake come through the OddsPapi API (no direct site access)."""
+    title = {"roobet": "Roobet", "stake": "Stake", "mystake": "MyStake"}[name]
+    key_set = bool(os.environ.get("ODDSPAPI_API_KEY"))
     return BookmakerReport(
-        title, "no legitimate source selected yet", "NOT_IMPLEMENTED",
-        error="no adapter: see docs/ODDS_SOURCES.md for what is known and what is needed (an API key via environment variable)",
+        title, "OddsPapi API (providers.oddspapi in config.yaml, off by default)",
+        "CONFIGURED" if key_set else "NO_KEY",
+        error=("" if key_set else "ODDSPAPI_API_KEY is not set (free key: https://oddspapi.io). ")
+        + "Not checked live: every request counts against the monthly quota. Test with: py start.py --once "
+        "(after enabling providers.oddspapi); see docs/ODDS_SOURCES.md",
     )
 
 
@@ -519,7 +524,7 @@ def render(report: BookmakerReport) -> str:
 def available_targets() -> list[str]:
     from odds_scanner.providers.sk import SK_PROVIDERS
 
-    return [*SITES, "roobet", "stake", *SK_PROVIDERS, "the_odds_api", *AGGREGATORS]
+    return [*SITES, "roobet", "stake", "mystake", *SK_PROVIDERS, "the_odds_api", *AGGREGATORS]
 
 
 def run(target: str, *, out: Callable[[str], None] = print, session_factory: Callable[[], Any] = new_session,
@@ -537,7 +542,7 @@ def run(target: str, *, out: Callable[[str], None] = print, session_factory: Cal
                 report.details += save_responses(site_report, save_dir)
         elif name in SK_PROVIDERS:
             report = check_provider(name)
-        elif name in ("roobet", "stake"):
+        elif name in ("roobet", "stake", "mystake"):
             report = check_unimplemented(name)
         elif name == "the_odds_api":
             report = check_odds_api()

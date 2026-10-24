@@ -255,4 +255,5 @@ opinion next to our direct Slovak feeds); (2) 37 s median prematch freshness is 
 | Continuous scanning of an aggregator | a plan with at least ~1 request per 30-60 s per sport, or WebSocket streaming |
 
 ## Changelog
+- 2026-10-24: OddsPapi provider added (Stake, Roobet, MyStake; free plan, request budget, docs-based parser, untested against a real answer) and Discord webhook alerts with per-channel bookmaker filters.
 - 2026-10-05: Tipsport SK and Chance SK tested from the owner's PC: both BLOCKED (403 bot-check at the home page). Initial version; diagnostics added; no live verification of Tipsport/Chance/Roobet/Stake possible from the build environment.

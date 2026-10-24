@@ -386,6 +386,25 @@ setx TELEGRAM_CHAT_ID "123456789"
 On Linux/macOS use `export`. Each arb is sent once (same match, market, bookmakers and odds) within
 `dedupe_ttl_minutes`; failed sends are retried, never crash the scanner and never log the token.
 
+### Discord alerts (per-channel bookmaker filters)
+
+`notifications.discord.channels` lists one entry per Discord channel: `webhook_env` (the environment
+variable holding that channel's webhook URL), `bookmakers` (post only arbs whose **every** leg is at one of
+these; leave out = any) and optionally `must_include` (and at least one leg at one of these, so a mixed channel
+does not repeat the pure ones) and `min_profit_percent`. The engine also searches each channel's bookmaker
+set on its own, so a Slovak-only channel gets the best Slovak-only combination even when the overall best
+uses Stake. Alerts are Discord embeds with stakes, links and the kick-off in each reader's own time zone.
+`py start.py discord-test` checks every channel and posts a test message. A channel whose variable is not
+set is skipped with a warning. Webhook URLs are never logged.
+
+### OddsPapi: Stake, Roobet, MyStake (optional, off by default)
+
+`providers.oddspapi` reads up to 3 bookmakers per request (`GET /v4/odds-by-tournaments` for the listed
+`tournament_ids`), key from `ODDSPAPI_API_KEY`. Football 1X2 (market 101) by default; parsing follows the
+vendor docs and has not been checked against a real answer yet. Every request is counted in
+`data/oddspapi_usage.json` and the source stops at `monthly_budget` (default 240, the free plan has 250).
+It is *metered*: adaptive polling never makes it poll faster than `poll_interval_seconds` (default 1200).
+
 ### The Odds API (optional, off by default)
 
 Set `providers.the_odds_api.enabled: true`, list Odds API sport keys in `providers.the_odds_api.sports`

@@ -56,6 +56,18 @@ providers:
     poll_interval_seconds: 600
     sports: [soccer_epl]         # Odds API sport keys
     options: {api_key_env: ODDS_API_KEY}
+  oddspapi:                      # Stake / Roobet / MyStake via the OddsPapi API (free key: https://oddspapi.io)
+    enabled: false               # needs:  $env:ODDSPAPI_API_KEY = "your key"
+    poll_interval_seconds: 1200  # FREE PLAN = 250 requests a month: one poll = 1 request. 1200 s = 3 per hour
+    # active_hours: "17:00-23:00"  # recommended: poll only in the evening (saves the monthly requests)
+    sports: [football]
+    options:
+      api_key_env: ODDSPAPI_API_KEY
+      bookmakers: [stake, roobet, mystake]   # max 3 per request (more = more requests per poll)
+      monthly_budget: 240        # the source stops itself after this many requests in a calendar month
+      tournament_ids: {football: [17, 8, 23, 35, 34, 7, 679]}  # Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, UCL, UEL
+      # sport_ids: {hockey: 15}       # other sports: only with ids checked in OddsPapi's docs
+      # market_ids: {hockey: 153}     # 153 = hockey regular-time 1X2 (vendor docs)
 
 # Odds API request settings (only used when the_odds_api is enabled, or with --replay)
 regions: [eu]
@@ -130,7 +142,25 @@ notifications:
     min_profit_percent: null        # alert threshold; null = min_profit_percent
   dashboard_url:                    # e.g. http://192.168.1.20:8765  -> adds an "OPEN DASHBOARD" link to Telegram alerts
   dedupe_ttl_minutes: 60            # (legacy --replay mode only; the live scanner uses the validation: rules above)
-  max_per_cycle: 10                 # cap on Telegram messages per analysis
+  max_per_cycle: 10                 # cap on Telegram / Discord messages per analysis (per channel)
+  discord:
+    enabled: false                  # set up first with:  py start.py discord-test
+    username: Arb Scanner           # name shown on the messages
+    # One entry per Discord channel. Each channel has its own webhook (Channel settings -> Integrations
+    # -> Webhooks -> New Webhook -> Copy URL), stored in an environment variable, never in this file.
+    # bookmakers:   post an arb only if EVERY bet is at one of these (leave out = any bookmaker)
+    # must_include: ...and at least one bet is at one of these (leave out = no such rule)
+    channels:
+      - name: slovakia
+        webhook_env: DISCORD_WEBHOOK_SK
+        bookmakers: [monacobet, doxxbet, nike, tipos, synot]
+      - name: crypto
+        webhook_env: DISCORD_WEBHOOK_CRYPTO
+        bookmakers: [stake, roobet, mystake]
+      - name: slovakia-crypto
+        webhook_env: DISCORD_WEBHOOK_SK_CRYPTO
+        bookmakers: [monacobet, doxxbet, nike, tipos, synot, stake, roobet, mystake]
+        must_include: [stake, roobet, mystake]   # only the mixed ones (pure-Slovak arbs are already in "slovakia")
 
 # ---- logging every arb found ---------------------------------------------------------------
 storage:

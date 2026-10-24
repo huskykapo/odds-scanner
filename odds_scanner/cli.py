@@ -75,7 +75,32 @@ def build_notifiers(cfg: Config, *, own_dedupe: bool = True) -> list[Notifier]:
                 dashboard_url=n.dashboard_url,
             )
         )
+    if n.discord.enabled:
+        from odds_scanner.notifiers.discord import DiscordNotifier
+
+        ready = 0
+        for ch in n.discord.channels:
+            try:
+                notifiers.append(DiscordNotifier.from_env(
+                    ch.webhook_env, name=ch.name, bookmakers=ch.bookmakers, must_include=ch.must_include,
+                    currency=cfg.currency, max_per_cycle=n.max_per_cycle,
+                    min_profit_percent=ch.min_profit_percent if ch.min_profit_percent is not None else n.telegram.min_profit_percent,
+                    dashboard_url=n.dashboard_url, username=n.discord.username,
+                ))
+                ready += 1
+            except ConfigError as exc:  # one channel not set up yet must not stop the others
+                log.warning("Discord channel skipped: %s", exc)
+        if not ready:
+            raise ConfigError("Discord is enabled but no channel has its webhook environment variable set (run: py start.py discord-test)")
     return notifiers
+
+
+def audiences(cfg: Config) -> list[frozenset[str]]:
+    """Bookmaker sets of the Discord channels: each gets its own arb search (see LiveEngine)."""
+    d = cfg.notifications.discord
+    if not d.enabled:
+        return []
+    return [frozenset(b.lower() for b in ch.bookmakers) for ch in d.channels if ch.bookmakers]
 
 
 def build_logs(cfg: Config) -> list[ArbLog]:
@@ -110,7 +135,19 @@ def build_sources(cfg: Config) -> list[Source]:
             sources.append(Source(
                 name, "The Odds API", provider, sports, sc.poll_interval_seconds,
                 fetch_kwargs={"regions": cfg.regions, "markets": cfg.markets, "bookmakers": cfg.bookmakers},
-                quota_floor=cfg.quota.stop_below, active_hours=_window(sc.active_hours),
+                quota_floor=cfg.quota.stop_below, active_hours=_window(sc.active_hours), metered=True,
+            ))
+            continue
+        if name == "oddspapi":
+            from odds_scanner.providers.oddspapi import OddsPapiProvider
+
+            papi = OddsPapiProvider(options=sc.options, timeout=sc.timeout_seconds, max_retries=sc.max_retries)
+            supported = [s for s in sports if papi.supports(s)]
+            skipped = [s for s in sports if not papi.supports(s)]
+            sources.append(Source(
+                name, "OddsPapi (" + ", ".join(papi.titles.values()) + ")", papi, supported, sc.poll_interval_seconds,
+                homepage=papi.homepage, skipped_sports=skipped, active_hours=_window(sc.active_hours),
+                metered=True, homepages=dict(papi.homepages),
             ))
             continue
         cls = SK_PROVIDERS[name]
@@ -178,6 +215,7 @@ def build_engine(cfg: Config) -> LiveEngine:
         logs=build_logs(cfg),
         validation=validation_settings(cfg),
         adaptive=adaptive_settings(cfg),
+        audiences=audiences(cfg),
         dedupe_ttl=timedelta(minutes=cfg.notifications.dedupe_ttl_minutes),
         currency=cfg.currency,
         detail_settings=DetailSettings(
@@ -280,12 +318,13 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         epilog="commands: run (default) - scan and serve the dashboard; probe - check each bookmaker endpoint once; "
         "probe-fortuna - check whether Fortuna's football page contains match data; "
         "telegram-test - guided Telegram alert setup and test message; "
+        "discord-test - send a test message to every configured Discord channel; "
         "diagnostics <bookmaker|all> - read-only check of one bookmaker's data source; "
         "stats - when (before kick-off) and between which bookmakers your logged arbs appeared; "
         "capture - save each bookmaker's raw responses into a ZIP (to add new bet types).",
     )
-    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "capture", "diagnostics", "stats"))
-    ap.add_argument("target", nargs="?", help="for diagnostics: all | tipsport | chance | roobet | stake | <any working bookmaker>")
+    ap.add_argument("command", nargs="?", default="run", choices=("run", "probe", "probe-fortuna", "telegram-test", "discord-test", "capture", "diagnostics", "stats"))
+    ap.add_argument("target", nargs="?", help="for diagnostics: all | tipsport | chance | roobet | stake | mystake | oddspapi-leagues | <any working bookmaker>")
     ap.add_argument("-c", "--config", default="config.yaml", help="path to config file (default: %(default)s)")
     ap.add_argument("--once", action="store_true", help="scan once and exit instead of polling forever")
     ap.add_argument("--no-dashboard", action="store_true", help="do not start the web dashboard")
@@ -324,6 +363,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.target:
             print("usage: diagnostics <bookmaker>   where bookmaker is one of: all, " + ", ".join(available_targets()))
             return EXIT_CONFIG
+        if args.target == "oddspapi-leagues":
+            from odds_scanner.providers.oddspapi import OddsPapiProvider, list_tournaments
+
+            try:
+                cfg = load_config(args.config)
+                return list_tournaments(OddsPapiProvider(options=cfg.providers["oddspapi"].options))
+            except OddsScannerError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return EXIT_CONFIG
         return run_diagnostics(args.target, save_dir=args.save)
     if args.command == "probe-fortuna":
         from odds_scanner.probe import probe_fortuna
@@ -355,6 +403,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             from odds_scanner.notifiers.telegram_setup import check_telegram
 
             return check_telegram(cfg)
+        if args.command == "discord-test":
+            from odds_scanner.notifiers.discord_setup import check_discord
+
+            return check_discord(cfg)
         if not args.replay:
             return run_live(cfg, build_engine(cfg), once=args.once, dashboard=not args.no_dashboard)
         # Legacy single-provider mode: replay a file in The Odds API format.

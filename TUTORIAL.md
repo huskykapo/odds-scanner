@@ -121,6 +121,46 @@ In `config.yaml` find the `telegram:` part and change `enabled: false` to `enabl
 **close PowerShell, open a new one**, and start the scanner again. Every new arb is sent once with
 the stakes. Your token is a password: never share it or put it in a file you share.
 
+## 5b. Discord alerts (one channel per group of bookmakers)
+
+Each Discord channel gets only the arbs its members can actually bet: e.g. `#slovakia` only arbs where
+**every** bet is at a Slovak bookmaker, `#crypto` only Stake/Roobet/MyStake, `#slovakia-crypto` only the
+mixed ones. No bot account is needed: each channel gets a *webhook* (a private posting address).
+
+1. In Discord, on your server: right-click the channel -> **Edit Channel** -> **Integrations** ->
+   **Webhooks** -> **New Webhook** -> **Copy Webhook URL**. Do this for each channel you want.
+2. In PowerShell, in the scanner folder (one line per channel you made):
+
+   ```powershell
+   $env:DISCORD_WEBHOOK_SK = "PASTE-THE-SLOVAKIA-URL"
+   $env:DISCORD_WEBHOOK_CRYPTO = "PASTE-THE-CRYPTO-URL"
+   $env:DISCORD_WEBHOOK_SK_CRYPTO = "PASTE-THE-MIXED-URL"
+   py start.py discord-test
+   ```
+
+   Every channel with a URL gets a test message; missing ones are listed (that's fine if you don't use them).
+3. `notepad config.yaml` -> under `notifications:` -> `discord:` change `enabled: false` to `enabled: true`.
+   The channel list there decides which bookmakers each channel accepts. Save and start the scanner.
+4. To keep the URLs for new windows: `setx DISCORD_WEBHOOK_SK "PASTE-THE-URL"` (same for the others).
+
+A webhook URL is a password: anyone who has it can post in that channel. Never share it or put it in a file.
+
+## 5c. Stake, Roobet and MyStake (free test via OddsPapi)
+
+These come from the OddsPapi API, not from the sites. **The free plan has 250 requests a month**, and every
+poll costs one, so this is for testing, not for scanning all day.
+
+1. Use your OddsPapi key: `$env:ODDSPAPI_API_KEY = "YOUR-KEY"` (permanent: `setx ODDSPAPI_API_KEY "YOUR-KEY"`).
+2. `notepad config.yaml` -> under `providers:` -> `oddspapi:` set `enabled: true`. Optional but recommended:
+   remove the `#` in front of `active_hours` so it only polls in the evening.
+3. Quick test (uses 1-2 requests): `py start.py --once`. The Providers panel / output shows how many
+   Stake/Roobet/MyStake matches were read. Then start normally with `py start.py`.
+
+Good to know: it polls every 20 minutes (never faster) and stops by itself after 240 requests in a month
+(`monthly_budget`). Prices older than 3 minutes are never used for an alert, so arbs with these bookmakers
+can only appear in the few minutes after each poll. The league list is in `tournament_ids`;
+`py start.py diagnostics oddspapi-leagues` (1 request) lists league ids if you want others.
+
 ## 6. Settings you may want to change
 
 Open the settings file with `notepad config.yaml`, edit, save, and restart the scanner.
@@ -160,6 +200,8 @@ usual. If you use git: `git pull`.
 py start.py                 # run the scanner + dashboard
 py start.py probe           # check every bookmaker site once
 py start.py telegram-test   # set up / test Telegram alerts
+py start.py discord-test    # test every Discord channel webhook
+py start.py diagnostics oddspapi-leagues   # list OddsPapi league ids (costs 1 request)
 py start.py --once          # scan once, print results, exit
 py start.py --port 8780     # use another port
 py start.py --help          # all options

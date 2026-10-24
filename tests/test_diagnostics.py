@@ -263,13 +263,18 @@ def test_provider_check_reports_empty_answers():
 
 
 # ------------------------------------------------------------------ command
-def test_run_unknown_and_unimplemented_targets():
+def test_run_unknown_and_unimplemented_targets(monkeypatch):
+    monkeypatch.delenv("ODDSPAPI_API_KEY", raising=False)
     lines = []
     assert d.run("nope", out=lines.append) == 2 and "choose one of" in lines[0]
     lines.clear()
     assert d.run("roobet", out=lines.append) == 1
     text = "\n".join(lines)
-    assert "NOT_IMPLEMENTED" in text and "ODDS_SOURCES.md" in text
+    assert "NO_KEY" in text and "ODDSPAPI_API_KEY" in text and "ODDS_SOURCES.md" in text
+    monkeypatch.setenv("ODDSPAPI_API_KEY", "TOPSECRET")
+    lines.clear()
+    assert d.run("mystake", out=lines.append) == 0
+    assert "CONFIGURED" in "\n".join(lines) and "TOPSECRET" not in "\n".join(lines)
 
 
 def test_report_has_every_requested_field_in_order():
@@ -293,11 +298,12 @@ def test_run_site_target_end_to_end_offline():
     assert code == 1 and "BLOCKED" in text and "Chance SK" in text and "no workaround attempted" in text
 
 
-def test_cli_command(capsys):
+def test_cli_command(capsys, monkeypatch):
     from odds_scanner import cli
 
+    monkeypatch.delenv("ODDSPAPI_API_KEY", raising=False)
     assert cli.main(["diagnostics"]) == 2 and "usage: diagnostics" in capsys.readouterr().out
-    assert cli.main(["diagnostics", "roobet"]) == 1 and "NOT_IMPLEMENTED" in capsys.readouterr().out
+    assert cli.main(["diagnostics", "roobet"]) == 1 and "NO_KEY" in capsys.readouterr().out
     assert cli.main(["diagnostics", "nonsense"]) == 2
 
 

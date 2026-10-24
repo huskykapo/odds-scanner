@@ -69,6 +69,13 @@ settings, so tiers are config, not code.
 with members. Reference prices (advertised): Odds-API.io GBP 49 (2 books) to 229 (15 books) per month; The Odds API about USD 30 for 20k
 credits; Betburger prematch EUR 79.99 (see ODDS_SOURCES.md).
 
+## Status (2026-10-24)
+
+Done, for free testing: Discord webhook alerts with per-channel bookmaker sets (`notifications.discord`),
+per-channel arb search in the engine (phase 1 without a separate regions file: the channel lists are the
+audiences), `discord-test`, and the OddsPapi source for Stake/Roobet/MyStake (free plan, 240-request
+monthly budget). Not done: role-picker bot, payments/tiers, other countries' bookmakers.
+
 ## 5. Phases
 
 0. Decisions (section 3): written answers from the data vendor(s), Discord/payment rules, lawyer for launch countries.
